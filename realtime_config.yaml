@@ -1,0 +1,40 @@
+# realtime_config.yaml
+# リアルタイム株価アラートシステム用 設定ファイル
+
+# 戦略実行のための時間足設定 (分単位)
+execution_interval_minutes: 1  # 例: 5分足で戦略を実行
+context_interval_minutes: 5 # 例: 15分足で環境認識
+
+# watchdogが監視する株価データファイルが格納されているディレクトリ
+data_directory_to_watch: "data/realtime_ohlc" # 例: プロジェクトルートからの相対パス
+
+# state_manager.py が銘柄ごとの状態を保存/読み込みするJSONファイルのディレクトリ
+state_file_directory: "runtime_state" # 例: プロジェクトルートからの相対パス
+
+# 処理対象とする銘柄コードのリスト
+# ここの銘柄コードと、data_directory_to_watch 内のファイル名の命名規則を合わせる必要があります。
+# 例: ファイル名が "1332_data.csv" の場合、"1332" をリストに含める
+watched_stock_codes:
+  - "3407"
+  #- "1802"
+  # - "1333"
+  # - "7203" # 必要に応じて追加
+
+# メール送信設定
+# email_settings:
+#   smtp_server: "smtp.gmail.com"
+#   smtp_port: 587 # or 465 for SSL
+#   use_tls: true # true or false (TLS/STARTTLSを使用する場合)
+#   use_ssl: false # true or false (SSLを直接使用する場合)
+#   smtp_user: "tomoyoshitaken@gmail.com"
+#   smtp_password: "your_email_passw" # セキュリティに注意。環境変数や別ファイルからの読み込みを推奨
+#   sender_email: "alert_sender@example.com"
+#   recipient_emails:
+#     - "user1@example.com"
+    # - "user2@example.com"
+
+# その他、リアルタイム処理に特有な設定項目があればここに追加
+# 例:
+# data_file_name_pattern: "{code}_kabu_prices.csv" # ファイル名のパターンマッチング用
+# min_bars_for_indicator_calc: 200 # 指標計算に必要な最低バー数 (足生成の参考に)
+# alert_cooldown_period_seconds: 300 # 同一銘柄・同一シグナルでの連続アラート抑制期間（秒）

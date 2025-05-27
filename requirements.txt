@@ -1,0 +1,34 @@
+# requirements.txt
+
+# How to use
+# ファイルの配置: この requirements.txt ファイルは、プロジェクトのルートディレクトリ (例: C:\StockBacktest\) に配置します。
+# 環境構築: 新しい環境でこのプロジェクトをセットアップする際は、以下のコマンドで依存ライブラリを一括インストールできます。
+# pip install -r requirements.txt
+
+# データ操作・数値計算
+pandas>=1.0.0,<2.0.0
+numpy>=1.18.0,<2.0.0
+
+# グラフ描画
+matplotlib>=3.0.0,<4.0.0
+mplfinance>=0.12.0,<0.13.0 # candlestick_ohlc (original_flavor) を使用
+
+# 設定ファイル処理
+PyYAML>=5.0,<7.0
+
+# テクニカル指標計算
+# TA-Lib は環境によってインストール方法が異なる場合があります。
+# 事前にCコンパイラとTA-LibのCライブラリのインストールが必要なことがあります。
+# Wheelファイル (例: https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib) からの
+# インストールが推奨される場合もあります。
+# pip install TA-Lib
+TA-Lib>=0.4.17,<0.5.0
+
+# その他、提供されたファイルから直接は見えないが、
+# warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+# の記述から、間接的に openpyxl を使用している可能性も考えられます。
+# もしExcelファイルの読み書きを行う場合は追加してください。
+# openpyxl>=3.0.0,<4.0.0
+
+# ファイルシステム監視
+watchdog>=2.0.0,<3.0.0

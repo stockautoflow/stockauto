@@ -1,0 +1,322 @@
+/* 基本スタイル */
+body {
+    margin: 0;
+    overflow: hidden; /* ページ全体のスクロールバーを隠す */
+    background-color: #e0e0e0; /* 背景色 */
+    display: flex; /* .app-container をflexアイテムにするため */
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* フォント指定 */
+    height: 100vh; /* ビューポート全体の高さ */
+    font-size: 14px; /* 基本フォントサイズ */
+    color: #333; /* 基本文字色 */
+}
+
+/* アプリケーションコンテナ */
+.app-container {
+    display: flex; /* サイドバーとメインコンテンツを横並びにする */
+    width: 100%;
+    height: 100%;
+}
+
+/* サイドバー */
+.sidebar {
+    width: 320px; /* サイドバーの幅 */
+    min-width: 280px; /* 最小幅 */
+    background-color: #f4f4f8; /* サイドバーの背景色 */
+    padding: 15px;
+    box-sizing: border-box; /* paddingとborderをwidth/heightに含める */
+    display: flex;
+    flex-direction: column; /* 要素を縦に並べる */
+    border-right: 1px solid #ccc; /* 右側の境界線 */
+    overflow-y: auto; /* 内容が多い場合にスクロール */
+}
+
+/* ファイルコントロール */
+.file-controls {
+    margin-bottom: 15px;
+}
+.file-input-label {
+    display: inline-block;
+    padding: 8px 12px;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    border-radius: 4px;
+    text-align: center;
+    margin-bottom: 8px;
+    font-size: 0.95em;
+    border: 1px solid transparent; /* 通常時のボーダー */
+}
+.file-input-label:hover {
+    background-color: #0056b3;
+}
+#svgFilesInput {
+    display: none; /* 実際のinputは隠してlabelで制御 */
+}
+/* セカンダリスタイルのファイル入力ラベル（例：設定読込ボタン） */
+.file-input-label.secondary {
+    background-color: #6c757d; /* グレー系 */
+    border-color: #6c757d;
+}
+.file-input-label.secondary:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+
+/* ファイルリスト */
+#fileListContainer {
+    flex-grow: 1; /* 残りのスペースを埋める */
+    overflow-y: auto; /* リストが長い場合にスクロール */
+    border: 1px solid #ddd;
+    background-color: #fff;
+    border-radius: 3px;
+    min-height: 100px; /* 最小の高さを確保 */
+}
+#fileList {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+#fileList li {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9em;
+    transition: background-color 0.2s ease;
+    word-break: break-all; /* 長いファイル名処理 */
+}
+#fileList li:last-child {
+    border-bottom: none;
+}
+#fileList li:hover {
+    background-color: #e9efff; /* ホバー時の背景色 */
+}
+#fileList li.active {
+    background-color: #007bff; /* アクティブなファイルの背景色 */
+    color: white; /* アクティブなファイルの文字色 */
+    font-weight: bold;
+}
+
+/* 区切り線 */
+hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 20px 0;
+}
+
+/* パネル共通 (アクションボタン、設定、ツール) */
+.panel h4, /* .action-buttons.panel の h4 にも適用 */
+.settings-panel h4,
+.tools-panel h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 1.1em;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+.action-buttons.panel {
+    margin-bottom: 0; /* hrが下にあるので */
+}
+
+
+/* 入力グループ */
+.input-group {
+    margin-bottom: 12px;
+}
+.input-group label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.9em;
+    color: #555;
+    font-weight: 500;
+}
+.input-group input[type="text"],
+.input-group input[type="number"],
+.input-group input[type="color"] {
+    width: calc(100% - 12px); /* paddingを考慮 */
+    padding: 6px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 0.95em;
+}
+.input-group input[type="color"] {
+    height: 30px;
+    padding: 2px; /* カラーピッカー用の調整 */
+}
+
+/* サイドバー内のボタン */
+.sidebar button {
+    padding: 8px 12px;
+    margin-top: 5px;
+    /* margin-right は .action-buttons や .tool-buttons で gap を使うか個別に設定 */
+    border: 1px solid #ccc;
+    background-color: #e9e9e9;
+    color: #333;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.9em;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.sidebar button:hover {
+    background-color: #dcdcdc;
+    border-color: #bbb;
+}
+.sidebar button:disabled {
+    background-color: #f0f0f0;
+    color: #aaa;
+    cursor: not-allowed;
+    border-color: #ddd;
+}
+
+/* アクションボタンとツールボタンのレイアウト */
+.action-buttons,
+.tool-buttons {
+    display: flex;
+    flex-wrap: wrap; /* ボタンが多い場合に折り返す */
+    gap: 8px; /* ボタン間のスペース */
+    margin-bottom: 10px;
+}
+.action-buttons button,
+.action-buttons .file-input-label, /* ラベルもボタン同様に扱う */
+.tool-buttons button {
+    flex-grow: 1; /* ボタンをコンテナ幅に応じて均等に広げる */
+    min-width: 60px; /* ボタンの最小幅 */
+    margin-top: 0; /* 上マージンは gap で管理 */
+    margin-right: 0; /* 右マージンは gap で管理 */
+}
+
+
+.sidebar button.active-tool {
+    background-color: #007bff;
+    color: white;
+    border-color: #0056b3;
+}
+.sidebar button.active-tool:hover {
+    background-color: #0056b3;
+}
+
+
+/* 選択オブジェクトパネル */
+#selectedObjectPanel {
+    background-color: #fdfdfd;
+    padding: 12px;
+    border: 1px dashed #007bff;
+    border-radius: 4px;
+    margin-top: 15px;
+}
+
+/* メインコンテンツエリア */
+.main-content {
+    flex-grow: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+/* SVGコンテナラッパー */
+#svgContainerWrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #ddd;
+    border-radius: 4px;
+}
+
+/* クロスヘア情報表示 */
+#crosshairInfo {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background-color: rgba(255, 255, 255, 0.85);
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-size: 0.85em;
+    color: #333;
+    z-index: 1001;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* SVGコンテナ */
+#svgContainer {
+    width: 100%;
+    height: 100%;
+    border: 1px solid #bbb;
+    overflow: hidden;
+    position: relative;
+    background-color: white;
+    cursor: grab;
+    box-shadow: 0 0 15px rgba(0,0,0,0.15);
+    border-radius: 3px;
+}
+
+/* SVG要素と描画レイヤー */
+#svgContainer svg,
+#svgContainer .drawing-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+#svgContainer .drawing-layer {
+    pointer-events: none;
+}
+/* 描画オブジェクト (線など) */
+#svgContainer .drawing-layer line,
+#svgContainer .drawing-layer path,
+#svgContainer .drawing-layer circle {
+    pointer-events: auto;
+}
+#svgContainer .drawing-layer .selected-object {
+    stroke: #ff0000 !important;
+}
+#svgContainer .drawing-layer .selected-object:not(circle) { /* 線の場合 */
+    stroke-width: 3px !important;
+    stroke-dasharray: 5,3;
+}
+#svgContainer .drawing-layer circle.selected-object { /* 点の場合 */
+    stroke: #ff0000 !important;
+    stroke-width: 2px !important;
+    /* fill-opacity: 0.7 !important; */
+}
+
+
+/* プレースホルダーテキスト */
+.placeholder-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #777;
+    font-size: 1.1em;
+    text-align: center;
+    padding: 20px;
+}
+
+/* 全画面クロスヘア */
+#crosshairX, #crosshairY {
+    position: fixed;
+    background-color: rgba(50, 50, 50, 0.5);
+    pointer-events: none;
+    z-index: 1000;
+    display: block;
+}
+#crosshairX {
+    left: 0;
+    width: 100%;
+    height: 1px;
+}
+#crosshairY {
+    top: 0;
+    height: 100%;
+    width: 1px;
+}

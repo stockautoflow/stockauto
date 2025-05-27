@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced SVG Viewer for Charts v2.3</title> <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+    <script>
+      if (typeof dayjs !== 'undefined' && typeof dayjs_plugin_customParseFormat !== 'undefined') {
+        dayjs.extend(dayjs_plugin_customParseFormat);
+      } else {
+        console.warn('Day.js or its customParseFormat plugin could not be loaded immediately. Ensure network access or local availability.');
+      }
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="file-controls">
+                <label for="svgFilesInput" class="file-input-label">SVGファイル選択</label>
+                <input type="file" id="svgFilesInput" accept=".svg" multiple>
+            </div>
+            <div id="fileListContainer">
+                <ul id="fileList"></ul>
+            </div>
+            <hr>
+            <div class="action-buttons panel">
+                <h4>操作</h4>
+                <button id="undoBtn" title="元に戻す" disabled>Undo</button>
+                <button id="redoBtn" title="やり直す" disabled>Redo</button>
+                <button id="saveAnnotationsBtn" title="アノテーションを保存">設定保存</button>
+                <label for="loadAnnotationsInput" class="file-input-label secondary">設定読込</label> <input type="file" id="loadAnnotationsInput" accept=".json" style="display: none;"> </div>
+            <hr>
+            <div class="settings-panel">
+                <h4>チャートデータ範囲設定</h4>
+                <div class="input-group">
+                    <label for="dataXMin">X軸 最小 (例: 2024-01-01 09:00):</label>
+                    <input type="text" id="dataXMin" placeholder="YYYY-MM-DD HH:mm">
+                </div>
+                <div class="input-group">
+                    <label for="dataXMax">X軸 最大 (例: 2024-01-31 15:00):</label>
+                    <input type="text" id="dataXMax" placeholder="YYYY-MM-DD HH:mm">
+                </div>
+                <div class="input-group">
+                    <label for="dataYMin">Y軸 最小値 (価格):</label>
+                    <input type="number" id="dataYMin" step="any" placeholder="例: 10000">
+                </div>
+                <div class="input-group">
+                    <label for="dataYMax">Y軸 最大値:</label>
+                    <input type="number" id="dataYMax" step="any" placeholder="例: 15000">
+                </div>
+                <button id="applyDataRange">範囲適用</button>
+                <button id="clearSettingsButton">設定クリア</button>
+            </div>
+            <hr>
+            <div class="tools-panel">
+                <h4>描画ツール</h4>
+                <div class="tool-buttons">
+                    <button id="toolSelectMode" title="選択/移動モード">選択</button>
+                    <button id="toolTrendline" title="トレンドライン描画">トレンド</button>
+                    <button id="toolHorizontalLine" title="水平線描画">水平線</button>
+                    <button id="toolVerticalLine" title="垂直線描画">垂直線</button>
+                    <button id="toolThickDot" title="太めの点描画">点</button>
+                </div>
+                <button id="deleteSelectedObject" disabled>選択オブジェクト削除</button>
+                <div class="input-group">
+                    <label for="drawingColor">描画色:</label>
+                    <input type="color" id="drawingColor" value="#0000FF">
+                </div>
+                <div class="input-group">
+                    <label for="drawingStrokeWidth">線の太さ/点の半径:</label>
+                    <input type="number" id="drawingStrokeWidth" value="2" min="1" max="20" step="1">
+                </div>
+            </div>
+            <hr>
+            <div id="selectedObjectPanel" class="settings-panel" style="display:none;">
+                <h4>選択オブジェクトのプロパティ</h4>
+                <div class="input-group">
+                    <label for="selectedObjectColor">色:</label>
+                    <input type="color" id="selectedObjectColor">
+                </div>
+                <div class="input-group">
+                    <label for="selectedObjectStrokeWidth">太さ/半径:</label>
+                    <input type="number" id="selectedObjectStrokeWidth" min="1" max="20" step="1">
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div id="svgContainerWrapper">
+                <div id="crosshairInfo">X: -, Y: -</div>
+                <div id="svgContainer">
+                    <p class="placeholder-text">左側の「SVGファイル選択」からファイルを選んでください。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="crosshairX"></div>
+    <div id="crosshairY"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
