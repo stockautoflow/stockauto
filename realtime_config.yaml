@@ -47,3 +47,9 @@ csv_output_directory_for_converter: "data/realtime_ohlc" # converter.pyのCSV出
 # --- 定期CSV変換設定 ---
 enable_periodic_excel_conversion: true # 定期変換を有効にするか (true/false)
 excel_conversion_interval_minutes: 1   # ExcelからCSVへの変換間隔（分）
+
+# --- チャート出力設定 ---
+output_chart_on_alert: true      # アラート時にチャートを出力するか (true/false)
+chart_output_directory: "data/realtime_charts" # チャート画像の保存先ディレクトリ
+# num_bars_for_realtime_chart: 200 # リアルタイムチャートに表示する足の本数 (chart.pyのNUM_BARS_TO_DISPLAYとは別に設定する場合)
+                                   # chart.pyの定数をそのまま使う場合はこの行は不要
