@@ -38,3 +38,12 @@ watched_stock_codes:
 # data_file_name_pattern: "{code}_kabu_prices.csv" # ファイル名のパターンマッチング用
 # min_bars_for_indicator_calc: 200 # 指標計算に必要な最低バー数 (足生成の参考に)
 # alert_cooldown_period_seconds: 300 # 同一銘柄・同一シグナルでの連続アラート抑制期間（秒）
+
+# --- CSV変換設定 ---
+convert_excel_to_csv_on_startup: true
+excel_file_path: "data/GetStockDataTest.xlsm"  # 実際のExcelファイルパスに置き換えてください
+csv_output_directory_for_converter: "data/realtime_ohlc" # converter.pyのCSV出力先
+
+# --- 定期CSV変換設定 ---
+enable_periodic_excel_conversion: true # 定期変換を有効にするか (true/false)
+excel_conversion_interval_minutes: 1   # ExcelからCSVへの変換間隔（分）

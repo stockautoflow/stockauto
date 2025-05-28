@@ -1,7 +1,7 @@
 # data_processor.py
 import pandas as pd
 import logging
-from base import load_csv_data # base.py の load_csv_data をインポート
+from data_utils import load_csv_data # <--- 変更: data_utils からインポート
 
 logger = logging.getLogger(__name__)
 

@@ -2,18 +2,23 @@
 import time
 import logging
 import os
-import yaml # PyYAMLライブラリ
+import yaml
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import datetime
 import pandas as pd
+import schedule
+import shutil  # <--- shutil をインポート
+import tempfile # <--- tempfile をインポート
 
 import state_manager
 import data_processor
-import strategy # strategy.py をインポート
-import alert_sender # alert_sender.py をインポート
+import strategy
+import alert_sender
+import converter
 
-# --- ロギング設定 ---
+# --- ロギング設定 (変更なし) ---
+# ... (省略) ...
 LOG_DIR = "log"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
@@ -33,57 +38,96 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 
-# --- 設定ファイルのパス定義 ---
+
+# --- 設定ファイルのパス定義 (変更なし) ---
 REALTIME_CONFIG_FILENAME = "realtime_config.yaml"
 STRATEGY_CONFIG_FILENAME = "config.yaml"
 
+# --- load_yaml_config (変更なし) ---
+# ... (省略) ...
 def load_yaml_config(filepath):
-    """YAMLファイルを読み込んで辞書として返す"""
     logger.debug(f"設定ファイル読み込み試行: {filepath}")
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             config_data = yaml.safe_load(f)
-            if not config_data: # ファイルは存在するが中身が空、またはYAMLとして無効な場合
+            if not config_data:
                 logger.warning(f"設定ファイル '{filepath}' が空、または有効なYAMLデータを含んでいません。")
-                return {} # 空の辞書を返す
+                return {}
             logger.info(f"設定ファイル '{filepath}' を正常に読み込みました。")
             return config_data
     except FileNotFoundError:
         logger.error(f"エラー: 設定ファイル '{filepath}' が見つかりません。")
-        return None # ファイルが存在しない場合はNoneを返す
+        return None
     except yaml.YAMLError as e:
         logger.error(f"エラー: 設定ファイル '{filepath}' のYAML解析に失敗しました: {e}")
-        return None # 解析失敗時もNoneを返す
+        return None
     except Exception as e:
         logger.error(f"エラー: 設定ファイル '{filepath}' の読み込み中に予期せぬエラーが発生しました: {e}", exc_info=True)
-        return None # その他のエラーでもNoneを返す
+        return None
 
-# --- ファイルイベントハンドラ ---
+# --- CSV変換ジョブ関数 (修正) ---
+def excel_to_csv_conversion_job(excel_path, csv_output_path):
+    """ExcelからCSVへの変換を実行するジョブ (コピーを作成して処理)"""
+    logger.info(f"定期Excel→CSV変換ジョブ実行開始: 元ファイル '{excel_path}'")
+    if not os.path.exists(excel_path):
+        logger.error(f"指定されたExcelファイルが見つかりません: {excel_path}。今回のCSV変換をスキップします。")
+        return
+    if not ensure_directory_exists(csv_output_path):
+        logger.error(f"CSV出力先ディレクトリ '{csv_output_path}' の準備に失敗。今回のCSV変換を中止します。")
+        return
+
+    temp_excel_file = None
+    try:
+        # 一時ディレクトリにExcelファイルのコピーを作成
+        # delete=False にして、処理後に手動で削除する
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsm", prefix="excel_copy_") as tmp:
+            temp_excel_file = tmp.name
+
+        logger.debug(f"元Excelファイルを一時ファイルにコピー中: '{excel_path}' -> '{temp_excel_file}'")
+        shutil.copy2(excel_path, temp_excel_file) # copy2 でメタデータも可能な限りコピー
+        logger.debug(f"コピー完了。一時Excelファイルを使用してCSV変換を実行: '{temp_excel_file}' -> '{csv_output_path}'")
+
+        # コピーした一時ファイルに対してCSV変換を実行
+        converter.create_csv_from_excel(temp_excel_file, csv_output_path) #
+        logger.info(f"定期Excel→CSV変換ジョブ完了 (詳細はconverterのログを確認)。元ファイル: '{excel_path}'")
+
+    except FileNotFoundError as e_fnf: # shutil.copy2 で発生する可能性
+        logger.error(f"Excelファイルのコピー中にエラー（ファイルが見つからない等）: {e_fnf}", exc_info=True)
+    except Exception as e_conv:
+        logger.error(f"定期Excel→CSV変換ジョブ中にエラー: {e_conv}", exc_info=True)
+    finally:
+        # 一時ファイルを削除
+        if temp_excel_file and os.path.exists(temp_excel_file):
+            try:
+                os.remove(temp_excel_file)
+                logger.debug(f"一時Excelファイルを削除しました: '{temp_excel_file}'")
+            except Exception as e_remove:
+                logger.error(f"一時Excelファイル '{temp_excel_file}' の削除中にエラー: {e_remove}")
+
+
+# --- ファイルイベントハンドラ (変更なし) ---
+# ... (PriceDataFileEventHandler クラスの定義は変更なし) ...
 class PriceDataFileEventHandler(FileSystemEventHandler):
-    def __init__(self, realtime_config, strategy_config_params): # strategy_config を strategy_config_params に変更
+    def __init__(self, realtime_config, strategy_config_params):
         super().__init__()
         self.realtime_config = realtime_config
-        self.strategy_config = strategy_config_params # strategy.load_strategy_config_yaml からロードされたもの
+        self.strategy_config = strategy_config_params
         self.watched_stock_codes = realtime_config.get('watched_stock_codes', [])
         self.state_file_dir = realtime_config.get('state_file_directory')
         if not self.state_file_dir:
             logger.error("状態ファイルディレクトリが realtime_config に設定されていません。")
-            self.state_file_dir = "default_runtime_state" # フォールバック例
+            self.state_file_dir = "default_runtime_state"
             ensure_directory_exists(self.state_file_dir)
-
-        # email_config の保持を削除 (alert_sender が直接 email_credentials.yaml を読むため)
-        # logger.info("メール設定は email_credentials.yaml から直接読み込まれます。")
 
         logger.info(f"監視対象の銘柄コード: {self.watched_stock_codes}")
         logger.info(f"状態ファイルディレクトリ: {os.path.abspath(self.state_file_dir)}")
 
-        # リアルタイム処理用のパラメータを準備
         self.realtime_params_for_strategy = {
             'interval_exec': self.realtime_config.get('execution_interval_minutes', 1),
             'interval_context': self.realtime_config.get('context_interval_minutes', 5),
-            'TRADING_HOURS_FORCE_EXIT_TIME_STR': self.strategy_config.get( # self.strategy_config から取得
+            'TRADING_HOURS_FORCE_EXIT_TIME_STR': self.strategy_config.get(
                 'TRADING_HOURS_FORCE_EXIT_TIME_STR',
-                self.strategy_config.get('TRADING_HOURS', {}).get('FORCE_EXIT_TIME_STR') # ネスト対応
+                self.strategy_config.get('TRADING_HOURS', {}).get('FORCE_EXIT_TIME_STR')
             )
         }
         if self.realtime_params_for_strategy['TRADING_HOURS_FORCE_EXIT_TIME_STR']:
@@ -107,16 +151,17 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
         logger.debug(f"ファイル変更検知: {filepath}")
 
         stock_code_match = None
-        for code in self.watched_stock_codes:
-            if filename.startswith(str(code)):
-                stock_code_match = str(code)
-                break
-        
+        if filepath.endswith(".csv"): 
+            for code in self.watched_stock_codes:
+                if filename.startswith(str(code)):
+                    stock_code_match = str(code)
+                    break
+
         if stock_code_match:
             logger.info(f"処理対象ファイル更新: {filename} (銘柄コード: {stock_code_match})")
             self.process_stock_data(stock_code_match, filepath)
         else:
-            logger.debug(f"無視するファイル変更: {filename}")
+            logger.debug(f"無視するファイル変更 (CSVでないか、対象銘柄コードで始まらない): {filename}")
 
     def on_created(self, event):
         if event.is_directory:
@@ -135,7 +180,7 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
 
             df_exec, df_context, updated_state = data_processor.load_and_prepare_data_for_strategy(
                 filepath,
-                self.strategy_config, # 戦略パラメータ (config.yaml の内容)
+                self.strategy_config,
                 current_state.copy()
             )
             current_state = updated_state
@@ -144,7 +189,7 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
                 logger.warning(f"銘柄 {stock_code}: 実行足の準備に失敗。処理を中断。")
                 state_manager.save_state(stock_code, current_state, self.state_file_dir)
                 return
-            
+
             if df_context is None:
                 logger.warning(f"銘柄 {stock_code}: 環境認識足の準備に失敗。空のDataFrameで代替します。")
                 df_context = pd.DataFrame()
@@ -155,7 +200,7 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
                 df_exec.copy(),
                 df_context.copy(),
                 self.realtime_params_for_strategy,
-                self.strategy_config # 戦略パラメータ (config.yaml の内容)
+                self.strategy_config
             )
 
             if indicators_df is None or indicators_df.empty:
@@ -247,8 +292,7 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
             if alert_needed:
                 logger.info(f"銘柄 {stock_code}: アラート送信実行！ メッセージ: {alert_message_body}")
                 current_state["last_alert_datetime"] = datetime.datetime.now().isoformat()
-                # alert_sender.send_email の呼び出しから email_config (SMTPサーバー情報) の引数を削除
-                # alert_sender が email_credentials.yaml から全てのメール設定を読み込む
+
                 email_sent_successfully = alert_sender.send_email(
                     alert_message_subject,
                     alert_message_body
@@ -267,9 +311,9 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"銘柄 {stock_code} の処理中にエラーが発生しました: {e}", exc_info=True)
 
-
+# --- ensure_directory_exists (変更なし) ---
+# ... (省略) ...
 def ensure_directory_exists(dir_path):
-    """指定されたディレクトリが存在しない場合、作成する"""
     if not os.path.exists(dir_path):
         try:
             os.makedirs(dir_path)
@@ -283,9 +327,7 @@ def main():
     logger.info("リアルタイム株価アラートシステムを開始します...")
 
     realtime_config = load_yaml_config(REALTIME_CONFIG_FILENAME)
-    # strategy.py の関数を使って戦略設定をロードし、フラット化する
     strategy_config_params = strategy.load_strategy_config_yaml(STRATEGY_CONFIG_FILENAME)
-
 
     if realtime_config is None:
         logger.fatal(f"リアルタイム設定ファイル '{REALTIME_CONFIG_FILENAME}' の読み込みに失敗しました。処理を終了します。")
@@ -299,6 +341,34 @@ def main():
     if not strategy_config_params:
         logger.fatal(f"戦略設定ファイル '{STRATEGY_CONFIG_FILENAME}' が空か、ロード後に有効なパラメータがありません。処理を終了します。")
         return
+
+    # --- 定期Excel→CSV変換のスケジューリング ---
+    excel_file_for_periodic_conversion = realtime_config.get('excel_file_path')
+    csv_output_dir_for_periodic_conversion = realtime_config.get('csv_output_directory_for_converter')
+    conversion_interval_min = realtime_config.get('excel_conversion_interval_minutes', 1)
+
+    if realtime_config.get('enable_periodic_excel_conversion', False):
+        if excel_file_for_periodic_conversion and csv_output_dir_for_periodic_conversion:
+            logger.info(
+                f"定期Excel→CSV変換を {conversion_interval_min} 分ごとにスケジュールします: "
+                f"'{excel_file_for_periodic_conversion}' -> '{csv_output_dir_for_periodic_conversion}'"
+            )
+            # 最初に一度実行 (任意。すぐに最新データが必要な場合)
+            # excel_to_csv_conversion_job(excel_file_for_periodic_conversion, csv_output_dir_for_periodic_conversion)
+
+            schedule.every(conversion_interval_min).minutes.do(
+                excel_to_csv_conversion_job,
+                excel_path=excel_file_for_periodic_conversion,
+                csv_output_path=csv_output_dir_for_periodic_conversion
+            )
+        else:
+            logger.warning(
+                "定期Excel→CSV変換が有効ですが、設定（excel_file_path または csv_output_directory_for_converter）が"
+                "不十分なためスケジュールされません。"
+            )
+    else:
+        logger.info("定期Excel→CSV変換は無効に設定されています。")
+    # ------------------------------------
 
     data_dir_to_watch = realtime_config.get('data_directory_to_watch')
     state_file_dir = realtime_config.get('state_file_directory')
@@ -328,12 +398,14 @@ def main():
 
     try:
         while True:
+            schedule.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("キーボード割り込みを受信しました。監視を終了します。")
     except Exception as e:
         logger.error(f"予期せぬエラーにより監視ループが停止しました: {e}", exc_info=True)
     finally:
+        schedule.clear()
         observer.stop()
         observer.join()
         logger.info("リアルタイム株価アラートシステムを終了しました。")

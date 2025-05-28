@@ -24,11 +24,14 @@ PyYAML>=5.0,<7.0
 # pip install TA-Lib
 TA-Lib>=0.4.17,<0.5.0
 
+# ファイルシステム監視
+watchdog>=2.0.0,<3.0.0
+
+# スケジューリング
+schedule>=1.0.0,<2.0.0 # <--- 追加
+
 # その他、提供されたファイルから直接は見えないが、
 # warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 # の記述から、間接的に openpyxl を使用している可能性も考えられます。
 # もしExcelファイルの読み書きを行う場合は追加してください。
 # openpyxl>=3.0.0,<4.0.0
-
-# ファイルシステム監視
-watchdog>=2.0.0,<3.0.0
