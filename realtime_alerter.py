@@ -11,6 +11,8 @@ import numpy as np # <--- 追加
 import schedule
 import shutil
 import tempfile
+import glob # <--- 追加: ファイル一覧取得のため
+import re   # <--- 追加: ファイル名からの銘柄コード抽出のため
 
 # --- matplotlib バックエンド設定 ---
 import matplotlib
@@ -105,13 +107,45 @@ def excel_to_csv_conversion_job(excel_path, csv_output_path):
                 logger.error(f"一時Excelファイル '{temp_excel_file}' の削除中にエラー: {e_remove}")
 
 
+# --- ★ 新規追加: データディレクトリから銘柄コードを抽出 ---
+def get_stock_codes_from_data_directory(directory_path):
+    """
+    指定されたディレクトリ内のCSVファイル名から4桁の銘柄コードを抽出する。
+    ファイル名は "XXXX_*.csv" (XXXXは4桁の数字) の形式を期待。
+    """
+    if not os.path.isdir(directory_path):
+        logger.warning(f"銘柄コード抽出対象のディレクトリが見つかりません: {directory_path}")
+        return []
+    
+    stock_codes = set()
+    # パターンに合致するCSVファイルのみを検索
+    # 例: 1234_1m_20230101.csv や 5678_ohlcv.csv など
+    for filepath in glob.glob(os.path.join(directory_path, "*.csv")):
+        filename = os.path.basename(filepath)
+        # ファイル名の先頭が4桁の数字で、その後にアンダースコアが続くパターン
+        match = re.match(r"(\d{4})_.*\.csv", filename)
+        if match:
+            stock_codes.add(match.group(1))
+            
+    if not stock_codes:
+        logger.warning(f"ディレクトリ '{directory_path}' 内に処理対象となる株価ファイルが見つかりませんでした。(期待するファイル名形式: XXXX_*.csv)")
+    
+    sorted_codes = sorted(list(stock_codes))
+    logger.info(f"ディレクトリ '{directory_path}' から {len(sorted_codes)} 個のユニークな銘柄コードを抽出しました: {sorted_codes}")
+    return sorted_codes
+# ---------------------------------------------------------
+
+
 # --- ファイルイベントハンドラ ---
 class PriceDataFileEventHandler(FileSystemEventHandler):
-    def __init__(self, realtime_config, strategy_config_params):
+    # --- ★ 修正: コンストラクタに watched_stock_codes を追加 ---
+    def __init__(self, realtime_config, strategy_config_params, dynamic_watched_stock_codes):
         super().__init__()
         self.realtime_config = realtime_config
         self.strategy_config = strategy_config_params
-        self.watched_stock_codes = realtime_config.get('watched_stock_codes', [])
+        # self.watched_stock_codes = realtime_config.get('watched_stock_codes', []) # 削除
+        self.watched_stock_codes = dynamic_watched_stock_codes # ★ 起動時に生成されたリストを使用
+        # ---------------------------------------------------------
         self.state_file_dir = realtime_config.get('state_file_directory')
         if not self.state_file_dir:
             logger.error("状態ファイルディレクトリが realtime_config に設定されていません。")
@@ -127,7 +161,7 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
             ensure_directory_exists(self.chart_output_dir)
 
 
-        logger.info(f"監視対象の銘柄コード: {self.watched_stock_codes}")
+        logger.info(f"監視対象の銘柄コード (動的生成): {self.watched_stock_codes}") # ログメッセージ更新
         logger.info(f"状態ファイルディレクトリ: {os.path.abspath(self.state_file_dir)}")
         if self.chart_output_on_alert:
             logger.info(f"アラート時チャート出力先: {os.path.abspath(self.chart_output_dir)}")
@@ -161,24 +195,38 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
         filename = os.path.basename(filepath)
         logger.debug(f"ファイル変更検知: {filepath}")
 
+        # --- ★ 修正: ファイル名から銘柄コードを抽出し、watched_stock_codes でチェック ---
         stock_code_match = None
         if filepath.endswith(".csv"):
-            for code in self.watched_stock_codes:
-                if filename.startswith(str(code)):
-                    stock_code_match = str(code)
-                    break
+            # ファイル名から銘柄コードを抽出 (例: "1234_data.csv" -> "1234")
+            match = re.match(r"(\d{4})_.*\.csv", filename)
+            if match:
+                extracted_code = match.group(1)
+                if extracted_code in self.watched_stock_codes: # 動的に生成されたリストでチェック
+                    stock_code_match = extracted_code
+                else:
+                    logger.debug(f"ファイル '{filename}' の銘柄コード '{extracted_code}' は監視対象外です。")
+            else:
+                logger.debug(f"ファイル '{filename}' は期待される命名規則 (XXXX_*.csv) に一致しません。")
+        # --------------------------------------------------------------------------
         
         if stock_code_match:
             logger.info(f"処理対象ファイル更新: {filename} (銘柄コード: {stock_code_match})")
             self.process_stock_data(stock_code_match, filepath)
         else:
-            logger.debug(f"無視するファイル変更 (CSVでないか、対象銘柄コードで始まらない): {filename}")
+            logger.debug(f"無視するファイル変更 (CSVでないか、対象銘柄コードでない、または命名規則不一致): {filename}")
 
     def on_created(self, event):
         if event.is_directory:
             return
         logger.debug(f"ファイル作成検知: {event.src_path}")
-        self.on_modified(event)
+        # ★ 新規ファイル作成時も同様に処理対象か判定する
+        #   ここでは、新しい銘柄ファイルが追加されても、
+        #   起動時にスキャンした self.watched_stock_codes に含まれていなければ処理されない。
+        #   もし、実行中に新規追加された銘柄も処理したい場合は、
+        #   watched_stock_codes を動的に更新する仕組みが必要。
+        #   今回は起動時スキャンのみと仮定。
+        self.on_modified(event) # on_modified と同じロジックで判定・処理
 
 
     def process_stock_data(self, stock_code, filepath):
@@ -499,9 +547,17 @@ def main():
     logger.info(f"監視対象ディレクトリ: {os.path.abspath(data_dir_to_watch)}")
     logger.info(f"状態ファイル保存ディレクトリ: {os.path.abspath(state_file_dir)}")
 
-    event_handler = PriceDataFileEventHandler(realtime_config, strategy_config_params)
+    # --- ★ 修正: 起動時に監視対象ディレクトリから銘柄リストを動的に生成 ---
+    dynamic_watched_codes = get_stock_codes_from_data_directory(data_dir_to_watch)
+    if not dynamic_watched_codes:
+        logger.warning(f"監視対象ディレクトリ '{data_dir_to_watch}' から処理可能な銘柄ファイルが見つかりませんでした。ファイル監視は開始しますが、実質的に何も処理されません。")
+    # --------------------------------------------------------------------
+
+    # --- ★ 修正: PriceDataFileEventHandler に動的銘柄リストを渡す ---
+    event_handler = PriceDataFileEventHandler(realtime_config, strategy_config_params, dynamic_watched_codes)
+    # --------------------------------------------------------------
     observer = Observer()
-    observer.schedule(event_handler, data_dir_to_watch, recursive=False)
+    observer.schedule(event_handler, data_dir_to_watch, recursive=False) # recursive=False のまま
     observer.start()
     logger.info("ファイル監視を開始しました。Ctrl+Cで終了します。")
 
