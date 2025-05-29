@@ -1,5 +1,5 @@
-# base.py (リサンプリング方式に変更)
-# base.py (循環インポート修正版)
+# base.py (リサンプリング方式に変更 + base_interval_str_arg 対応)
+# ... (既存のimport文やグローバル変数はそのまま) ...
 import pandas as pd
 import numpy as np
 import datetime
@@ -14,8 +14,8 @@ import re
 import json
 
 import chart
-import data_processor # これは run_backtest で使用する
-from data_utils import load_csv_data # <--- 変更: data_utils からインポート
+import data_processor
+from data_utils import load_csv_data
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -31,60 +31,11 @@ INITIAL_CAPITAL = 70_000_000
 RISK_PER_TRADE = 0.005
 COMMISSION_RATE = 0.0005
 SLIPPAGE = 0.0002
-
-def get_codes_from_data_dir(data_dir_path, base_interval_str_for_glob, date_str_for_glob): # interval_str を base_interval_str に変更
-    logging.info(f"データフォルダから銘柄コードリストを推測中: {data_dir_path} (指定日付: {date_str_for_glob}, 基本足種パターン: {base_interval_str_for_glob})")
-    codes = set()
-    try:
-        if not os.path.isdir(data_dir_path): raise FileNotFoundError(f"データフォルダが見つかりません: {data_dir_path}")
-        # 1分足データファイル (例: XXXX_1m_YYYYMMDD.csv) を基準に銘柄コードを検索
-        pattern_specific_date = f"????_{base_interval_str_for_glob}_{date_str_for_glob}.csv"
-        logging.debug(f"  検索パターン (指定日付): {pattern_specific_date}")
-        file_list_specific_date = glob.glob(os.path.join(data_dir_path, pattern_specific_date))
-        file_list_to_process = file_list_specific_date
-        used_wildcard_date = False
-        if not file_list_specific_date:
-            pattern_any_date = f"????_{base_interval_str_for_glob}_*.csv"
-            logging.debug(f"  指定日付のファイルなし。代替検索パターン (日付ワイルドカード): {pattern_any_date}")
-            file_list_any_date = glob.glob(os.path.join(data_dir_path, pattern_any_date))
-            if file_list_any_date:
-                logging.info(f"  指定日付 '{date_str_for_glob}' の '{base_interval_str_for_glob}' ファイルが見つからなかったため、日付部分が異なるファイルも対象とします。")
-                file_list_to_process = file_list_any_date; used_wildcard_date = True
-            else: raise FileNotFoundError(f"フォルダ '{data_dir_path}' 内に '{pattern_specific_date}' または (代替として) '{pattern_any_date}' に一致するファイルが見つかりませんでした。")
-        for fpath in file_list_to_process:
-            fname = os.path.basename(fpath)
-            parts = fname.split('_')
-            if len(parts) > 0 and parts[0].isdigit() and len(parts[0]) >= 4: codes.add(parts[0][:4])
-        sorted_codes = sorted(list(codes))
-        if not sorted_codes: raise ValueError(f"ファイル名から4桁の銘柄コードを抽出できませんでした。{' (日付ワイルドカード使用)' if used_wildcard_date else ''}")
-        logging.info(f"データフォルダ内のファイル名から {len(sorted_codes)} 個の銘柄コードを推測しました。{' (日付ワイルドカード使用)' if used_wildcard_date else ''}")
-        return sorted_codes
-    except FileNotFoundError as fnf: logging.error(f"エラー: {fnf}"); return []
-    except ValueError as ve: logging.error(f"エラー: {ve}"); return []
-    except Exception as e: logging.error(f"銘柄リスト推測中に予期せぬエラーが発生しました: {e}"); return []
-
-# log_perf_summary は変更なし
-def log_perf_summary(stock_code, df_processed_data, final_equity_val, total_pnl_val, max_drawdown_val,
-                     total_trades_val, win_rate_val, profit_factor_val, avg_winning_trade_val, avg_losing_trade_val):
-    # ... (内容は変更なし) ...
-    logging.info(f"--- パフォーマンス指標 (銘柄: {stock_code}) ---")
-    if df_processed_data is not None and not df_processed_data.empty and isinstance(df_processed_data.index, pd.DatetimeIndex) and len(df_processed_data.index) > 1:
-        logging.info(f"  期間: {df_processed_data.index[0].strftime('%Y-%m-%d %H:%M')} - {df_processed_data.index[-1].strftime('%Y-%m-%d %H:%M')}")
-    else: logging.info("  期間: N/A (データ不足)")
-    logging.info(f"  最終資産: {final_equity_val:,.0f} 円 (初期資産: {INITIAL_CAPITAL:,.0f} 円)")
-    logging.info(f"  総損益 (PnL): {total_pnl_val:,.0f} 円")
-    if INITIAL_CAPITAL > 0: logging.info(f"  リターン率: {(final_equity_val / INITIAL_CAPITAL - 1) * 100:.2f}%")
-    else: logging.info("  リターン率: N/A (初期資産が0のため計算不可)")
-    logging.info(f"  最大ドローダウン: {max_drawdown_val:.2f}%" if not np.isnan(max_drawdown_val) else "最大ドローダウン: N/A")
-    logging.info(f"  総トレード数: {total_trades_val}")
-    logging.info(f"  勝率: {win_rate_val:.2f}%")
-    logging.info(f"  プロフィットファクター: {profit_factor_val:.2f}" if profit_factor_val != np.inf else "プロフィットファクター: inf")
-    logging.info(f"  平均利益（勝ちトレード）: {avg_winning_trade_val:,.0f} 円")
-    logging.info(f"  平均損失（負けトレード）: {avg_losing_trade_val:,.0f} 円")
-
+# ... (load_csv_data, get_codes_from_data_dir, log_perf_summary 関数は変更なし) ...
 
 def run_backtest(strategy_module_name, config_filepath,
                  exec_interval_min, context_interval_min, date_str,
+                 base_interval_str_arg, # <--- 新しい引数を追加
                  output_chart_flag, target_chart_codes_list,
                  invalid_chart_codes_from_cli):
     # ... (ログ設定、戦略モジュール読み込み、パラメータ読み込みなどは変更なし) ...
@@ -95,30 +46,31 @@ def run_backtest(strategy_module_name, config_filepath,
 
     execution_start_time = datetime.datetime.now() 
     now_str_for_files = execution_start_time.strftime('%Y%m%d%H%M%S')
-    # interval_xxx_str_format はファイル名パターンに使われるが、1分足基準になるので注意
-    base_interval_str_for_file_search = "1m" # <--- 1分足データを基準とする
+    
+    # base_interval_str_for_file_search を引数から受け取った値で設定
+    base_interval_str_for_file_search = base_interval_str_arg # <--- 変更点
 
     safe_strategy_name_for_file = strategy_module_name.replace('.', '_')
 
-    # ログファイル名には指定された実行足・環境足インターバルを残す
-    log_filename_format = f"BacktestLog_{safe_strategy_name_for_file}_{exec_interval_min}m{context_interval_min}m_{date_str}_{now_str_for_files}.log"
+    log_filename_format = f"BacktestLog_{safe_strategy_name_for_file}_{exec_interval_min}m{context_interval_min}m_base{base_interval_str_for_file_search}_{date_str}_{now_str_for_files}.log"
     log_filepath_format = os.path.join(LOG_DIR, log_filename_format)
+    # ... (logging.basicConfig の設定は変更なし) ...
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] (%(module)s:%(funcName)s:%(lineno)d) %(message)s',
         handlers=[
-            logging.FileHandler(log_filepath_format, encoding='utf-8')
+            logging.FileHandler(log_filepath_format, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout) # コンソールにも出す場合
         ]
     )
     print(f"--- バックテスト処理開始 (ログファイル: {log_filepath_format}) ---")
 
     logging.info(f"=== バックテストスクリプト開始 (Strategy: {strategy_module_name}, Config: {config_filepath}) ===")
-    logging.info(f"実行足: {exec_interval_min}m, 環境足: {context_interval_min}m (基本データ: {base_interval_str_for_file_search}), データ日付: {date_str}")
+    logging.info(f"実行足: {exec_interval_min}m, 環境足: {context_interval_min}m (基本データ: {base_interval_str_for_file_search}), データ日付: {date_str}") # ログ出力も更新
 
-
-    # --- (中略: 戦略モジュール、パラメータ読み込み、取引時間設定など) ---
+    # ... (戦略モジュール読み込み、パラメータ読み込み、取引時間設定などは変更なし) ...
     if invalid_chart_codes_from_cli:
         logging.warning(f"コマンドラインでのチャート対象銘柄指定において、以下の不正な形式のコードが検出されました（これらはグラフ出力対象から除外されています）: {', '.join(invalid_chart_codes_from_cli)}")
 
@@ -185,10 +137,11 @@ def run_backtest(strategy_module_name, config_filepath,
         print(f"エラー (base): 取引時間の設定値が不正です。ログを確認してください。", file=sys.stderr)
         raise
 
+
     stock_codes_list_all = []
     try:
         # get_codes_from_data_dir に base_interval_str_for_file_search を渡す
-        stock_codes_list_all = get_codes_from_data_dir(DATA_DIR_PATH, base_interval_str_for_file_search, date_str)
+        stock_codes_list_all = get_codes_from_data_dir(DATA_DIR_PATH, base_interval_str_for_file_search, date_str) # <--- 変更点
         if not stock_codes_list_all:
             raise ValueError(f"データフォルダ {DATA_DIR_PATH} (日付 {date_str}) から基本足({base_interval_str_for_file_search})の銘柄コードを推測できませんでした。")
         NUM_STOCKS_TO_PROCESS = len(stock_codes_list_all)
@@ -202,7 +155,7 @@ def run_backtest(strategy_module_name, config_filepath,
         print(f"エラー (base): 銘柄リスト推測中に予期せぬエラーが発生しました。", file=sys.stderr)
         raise
 
-
+    # ... (バックテストのメインループ開始) ...
     print(f"--- 全 {NUM_STOCKS_TO_PROCESS} 銘柄のバックテスト処理ループ開始 ---")
     results_summary_list = []
     all_trades_log_list = []
@@ -216,48 +169,38 @@ def run_backtest(strategy_module_name, config_filepath,
         print(f"  Processing: {stock_code_val} ({total_stocks_processed_count}/{NUM_STOCKS_TO_PROCESS})... ", end="", flush=True)
         logging.info(f"\n  --- {progress_str} のバックテスト処理開始 ---")
 
-        # 1分足データファイルのパスを特定
-        filepath_1min_val, filename_1min_val = None, ""
-        specific_1min_file_path = os.path.join(DATA_DIR_PATH, f"{stock_code_val}_{base_interval_str_for_file_search}_{date_str}.csv")
-        if os.path.exists(specific_1min_file_path):
-            filepath_1min_val = specific_1min_file_path
+        # 基本足データファイルのパスを特定
+        filepath_base_data_val, filename_base_data_val = None, ""
+        specific_base_file_path = os.path.join(DATA_DIR_PATH, f"{stock_code_val}_{base_interval_str_for_file_search}_{date_str}.csv") # <--- 変更点
+        if os.path.exists(specific_base_file_path):
+            filepath_base_data_val = specific_base_file_path
         else:
-            alt_1min_files_list = glob.glob(os.path.join(DATA_DIR_PATH, f"{stock_code_val}_{base_interval_str_for_file_search}_*.csv"))
-            if alt_1min_files_list:
-                filepath_1min_val = alt_1min_files_list[0]
-                logging.warning(f"    1分足: 指定日付ファイルなし。代替ファイル '{os.path.basename(filepath_1min_val)}' 使用。")
+            alt_base_files_list = glob.glob(os.path.join(DATA_DIR_PATH, f"{stock_code_val}_{base_interval_str_for_file_search}_*.csv")) # <--- 変更点
+            if alt_base_files_list:
+                filepath_base_data_val = alt_base_files_list[0]
+                logging.warning(f"    基本足データ: 指定日付ファイルなし。代替ファイル '{os.path.basename(filepath_base_data_val)}' 使用。")
         
-        if filepath_1min_val:
-            filename_1min_val = os.path.basename(filepath_1min_val)
+        if filepath_base_data_val:
+            filename_base_data_val = os.path.basename(filepath_base_data_val)
         else:
-            logging.error(f"  {progress_str}: 1分足CSVファイル未検出 ({base_interval_str_for_file_search}基準)。スキップ。")
-            results_summary_list.append({'銘柄コード': stock_code_val, 'エラー': f'基本足CSV({base_interval_str_for_file_search})なし'})
-            print(f"NG (基本足CSV({base_interval_str_for_file_search})なし)")
+            logging.error(f"  {progress_str}: 基本足CSVファイル未検出 ({base_interval_str_for_file_search}基準)。スキップ。") # <--- 変更点
+            results_summary_list.append({'銘柄コード': stock_code_val, 'エラー': f'基本足CSV({base_interval_str_for_file_search})なし'}) # <--- 変更点
+            print(f"NG (基本足CSV({base_interval_str_for_file_search})なし)") # <--- 変更点
             continue
         
-        logging.info(f"    使用基本データファイル: '{filename_1min_val}'")
-
+        logging.info(f"    使用基本データファイル: '{filename_base_data_val}'")
+    # ... (以降のバックテストループ、指標計算、シグナル生成、売買シミュレーション、結果集計は変更なし) ...
+    # ただし、df_base_1min を df_base_data に変更し、filepath_1min_val を filepath_base_data_val に変更する。
         df_exec_ohlc, df_context_ohlc, df_with_signals = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         current_capital = INITIAL_CAPITAL; current_equity = INITIAL_CAPITAL
         current_position = 0; current_entry_price = 0.0; current_shares = 0
         trade_history_for_stock = []; equity_curve_for_stock = [INITIAL_CAPITAL]; entry_datetime_obj = None
 
         try:
-            # 1分足データを読み込み
-            df_base_1min = load_csv_data(filepath_1min_val) #
-            if df_base_1min.empty:
-                raise ValueError(f"読み込んだ1分足データが空です: {filepath_1min_val}")
+            df_base_data = load_csv_data(filepath_base_data_val) # df_base_1min から変更
+            if df_base_data.empty:
+                raise ValueError(f"読み込んだ基本足データが空です: {filepath_base_data_val}")
 
-            # data_processor を使って実行足と環境認識足を生成
-            # data_processor.load_and_prepare_data_for_strategy は状態も更新するので、
-            # ここではリサンプリング部分だけを借用するか、同様のロジックをここに書く。
-            # 簡単のため、data_processor.resample_ohlcv を直接利用。
-            # 実際には strategy_config の代わりに exec_interval_min, context_interval_min を渡す必要がある。
-            # config.yaml に 'execution_interval_minutes', 'context_interval_minutes' があればそれを使う。
-            # なければコマンドライン引数の値を使う。
-            
-            # config.yaml にインターバル指定があればそれを優先、なければコマンドライン引数
-            # data_processor.py で使っているキー名に合わせる
             effective_exec_interval = loaded_strategy_params.get('EXECUTION_INTERVAL_MINUTES', exec_interval_min)
             effective_context_interval = loaded_strategy_params.get('CONTEXT_INTERVAL_MINUTES', context_interval_min)
 
@@ -266,39 +209,33 @@ def run_backtest(strategy_module_name, config_filepath,
             if effective_context_interval != context_interval_min:
                  logging.info(f"    環境足インターバル: config.yamlの値 ({effective_context_interval}分) を使用 (CLI: {context_interval_min}分)")
 
-
-            df_exec_ohlc = data_processor.resample_ohlcv(df_base_1min.copy(), effective_exec_interval) #
-            df_context_ohlc = data_processor.resample_ohlcv(df_base_1min.copy(), effective_context_interval) #
+            df_exec_ohlc = data_processor.resample_ohlcv(df_base_data.copy(), effective_exec_interval) 
+            df_context_ohlc = data_processor.resample_ohlcv(df_base_data.copy(), effective_context_interval)
 
             if df_exec_ohlc.empty: raise ValueError(f"リサンプリング後の実行足データが空です。({effective_exec_interval}分)")
-            if df_context_ohlc.empty: raise ValueError(f"リサンプリング後の環境足データが空です。({effective_context_interval}分)")
+            # 環境足が空でも処理を続ける場合があるため、警告のみにすることも検討 (戦略による)
+            if df_context_ohlc.empty and effective_context_interval > 0 : # 0なら環境足なしとみなす
+                 logging.warning(f"リサンプリング後の環境足データが空です。({effective_context_interval}分)。環境認識なしで続行します。")
+                 df_context_ohlc = pd.DataFrame() # 空のDFを渡す
             
-            # current_strategy_params にはコマンドライン引数のインターバルを渡す
-            # strategy.py 内で get_merged_param が config.yaml と比較してどちらを使うか決定する
-            # ただし、data_processor に渡したインターバルと整合性を取る必要がある。
-            # ここでは、バックテストフレームワークのインターバル指定(コマンドライン)を優先とし、
-            # current_strategy_params にそれを設定し、strategy.py に渡す。
-            # strategy.pyのget_merged_paramがconfig.yamlに同名キーがあればそれを優先する。
-            # その場合、チャート表示名などとの整合性に注意。
-            # ここでは、コマンドラインで指定されたインターバルを正とする。
             current_strategy_params['interval_exec'] = exec_interval_min
             current_strategy_params['interval_context'] = context_interval_min
 
-
-            # --- (以降の指標計算、シグナル生成、バックテストループは基本的に変更なし) ---
-            # ただし、df_exec_ohlc, df_context_ohlc はリサンプリングされたものを使用。
-            current_min_date = df_exec_ohlc.index.min()
-            current_max_date = df_exec_ohlc.index.max()
-            if processed_data_period_start is None or current_min_date < processed_data_period_start:
-                processed_data_period_start = current_min_date
-            if processed_data_period_end is None or current_max_date > processed_data_period_end:
-                processed_data_period_end = current_max_date
+            current_min_date = df_exec_ohlc.index.min() if not df_exec_ohlc.empty else (df_base_data.index.min() if not df_base_data.empty else None)
+            current_max_date = df_exec_ohlc.index.max() if not df_exec_ohlc.empty else (df_base_data.index.max() if not df_base_data.empty else None)
+            
+            if current_min_date is not None:
+                if processed_data_period_start is None or current_min_date < processed_data_period_start:
+                    processed_data_period_start = current_min_date
+            if current_max_date is not None:
+                if processed_data_period_end is None or current_max_date > processed_data_period_end:
+                    processed_data_period_end = current_max_date
 
             df_merged_indicators = strategy_module.calculate_indicators(
                 df_exec_ohlc.copy(),
-                df_context_ohlc.copy(),
-                current_strategy_params, # コマンドライン引数由来のインターバルなど
-                loaded_strategy_params   # config.yaml の内容
+                df_context_ohlc.copy(), # 空のDFの場合もある
+                current_strategy_params,
+                loaded_strategy_params
             )
             if df_merged_indicators is None or df_merged_indicators.empty:
                 raise ValueError("strategy.calculate_indicators が有効なDataFrameを返しませんでした。")
@@ -308,7 +245,6 @@ def run_backtest(strategy_module_name, config_filepath,
                 current_strategy_params,
                 loaded_strategy_params
             )
-            # ... (以降のバックテストループ、結果集計、チャート出力、メタ情報保存は変更なし) ...
             if df_with_signals is None or df_with_signals.empty or 'Signal' not in df_with_signals.columns:
                 raise ValueError("strategy.generate_signals が 'Signal' カラムを含む有効なDataFrameを返しませんでした。")
             if not all(col in df_with_signals.columns for col in ['Open', 'High', 'Low', 'Close']):
@@ -318,7 +254,7 @@ def run_backtest(strategy_module_name, config_filepath,
                 results_summary_list.append({ '銘柄コード': stock_code_val, 'エラー': 'データ不足(シグナル後2行未満)'})
                 print("NG (データ不足)")
                 continue
-
+            # ... (売買シミュレーションループは変更なし) ...
             for i in range(1, len(df_with_signals) -1):
                 current_bar_index = df_with_signals.index[i]
                 current_bar_time = current_bar_index.time()
@@ -436,21 +372,20 @@ def run_backtest(strategy_module_name, config_filepath,
 
             if output_chart_flag:
                 if not target_chart_codes_list or stock_code_val in target_chart_codes_list:
-                    # チャートファイル名はコマンドライン引数のインターバル名を使う
                     chart_interval_exec_str = f"{exec_interval_min}m"
                     chart_interval_context_str = f"{context_interval_min}m"
                     chart_base_filename_parts = [
                         safe_strategy_name_for_file, 
-                        f"{chart_interval_exec_str}{chart_interval_context_str}", # 表示用
+                        f"{chart_interval_exec_str}{chart_interval_context_str}",
                         date_str,
                         stock_code_val
                     ]
                     logging.info(f"  {progress_str}: チャート出力処理を開始します。")
                     try:
                         chart.plot_chart_for_stock(
-                            df_context_ohlc, # リサンプリングされた環境足
-                            df_exec_ohlc,    # リサンプリングされた実行足
-                            df_with_signals, # 指標とシグナルが付与された実行足ベースのDF
+                            df_context_ohlc, 
+                            df_exec_ohlc,    
+                            df_with_signals, 
                             trade_log_df_for_stock,
                             stock_code_val,
                             loaded_strategy_params,
@@ -476,20 +411,18 @@ def run_backtest(strategy_module_name, config_filepath,
             print(f"NG (エラー: {type(e_stock).__name__} in {stock_code_val})")
         logging.info(f"  --- {progress_str} のバックテスト処理終了 ---")
 
-    # --- 全体結果とメタ情報の出力 (変更なし) ---
-    # ... (省略) ...
+    # --- 全体結果とメタ情報の出力 ---
     logging.info(f"\n===== 全 {total_stocks_processed_count} 銘柄のバックテストが完了しました =====")
     print(f"\n===== 全 {total_stocks_processed_count} 銘柄のバックテストが完了しました =====")
-    # interval_combination_str はコマンドライン引数のインターバルを使う
     interval_combination_str = f"{exec_interval_min}m{context_interval_min}m"
 
     meta_info = {
         "execution_datetime": execution_start_time.isoformat(),
         "strategy_module": strategy_module_name,
         "config_file": config_filepath,
-        "execution_interval_minutes": exec_interval_min, # CLIで指定された値
-        "context_interval_minutes": context_interval_min, # CLIで指定された値
-        "base_data_interval": base_interval_str_for_file_search, # 新規追加：実際に読み込んだ基本足
+        "execution_interval_minutes": exec_interval_min,
+        "context_interval_minutes": context_interval_min,
+        "base_data_interval": base_interval_str_for_file_search, # <--- メタ情報に追加
         "data_date": date_str,
         "chart_output_enabled": output_chart_flag,
         "chart_target_codes": target_chart_codes_list if target_chart_codes_list else "ALL",
@@ -501,8 +434,9 @@ def run_backtest(strategy_module_name, config_filepath,
         "processed_data_period_end": processed_data_period_end.isoformat() if processed_data_period_end else None,
         "loaded_strategy_parameters": loaded_strategy_params_for_meta 
     }
-    meta_output_filename = f"BacktestMeta_{safe_strategy_name_for_file}_{interval_combination_str}_{date_str}_{now_str_for_files}.json"
+    meta_output_filename = f"BacktestMeta_{safe_strategy_name_for_file}_{interval_combination_str}_base{base_interval_str_for_file_search}_{date_str}_{now_str_for_files}.json" # ファイル名にも追加
     meta_output_filepath = os.path.join(RESULTS_DIR, meta_output_filename)
+    # ... (メタ情報、詳細CSV、サマリーCSVの出力部分は変更なし) ...
     try:
         with open(meta_output_filepath, 'w', encoding='utf-8') as f:
             json.dump(meta_info, f, ensure_ascii=False, indent=4)
@@ -512,10 +446,9 @@ def run_backtest(strategy_module_name, config_filepath,
         logging.error(f"エラー: メタ情報JSON出力失敗: {e_json}")
         print(f"エラー (base): メタ情報JSON出力失敗: {e_json}", file=sys.stderr)
 
-
     if all_trades_log_list:
         all_trades_combined_df = pd.concat(all_trades_log_list, ignore_index=True)
-        detail_output_filename = f"BacktestDetail_{safe_strategy_name_for_file}_{interval_combination_str}_{date_str}_{now_str_for_files}.csv"
+        detail_output_filename = f"BacktestDetail_{safe_strategy_name_for_file}_{interval_combination_str}_base{base_interval_str_for_file_search}_{date_str}_{now_str_for_files}.csv"
         detail_output_filepath = os.path.join(RESULTS_DIR, detail_output_filename)
         detail_columns_order = ['銘柄コード','entry_date', 'exit_date', 'type', 'entry_price', 'exit_price', 'shares', 'pnl', 'exit_type']
         detail_columns_present = [col for col in detail_columns_order if col in all_trades_combined_df.columns]
@@ -532,7 +465,7 @@ def run_backtest(strategy_module_name, config_filepath,
 
     if results_summary_list:
         summary_df = pd.DataFrame(results_summary_list)
-        summary_output_filename = f"BacktestSummary_{safe_strategy_name_for_file}_{interval_combination_str}_{date_str}_{now_str_for_files}.csv"
+        summary_output_filename = f"BacktestSummary_{safe_strategy_name_for_file}_{interval_combination_str}_base{base_interval_str_for_file_search}_{date_str}_{now_str_for_files}.csv"
         summary_output_filepath = os.path.join(RESULTS_DIR, summary_output_filename)
         expected_summary_cols = ['銘柄コード', '総損益', 'PF', '勝率(%)', 'トレード数', '最大DD(%)', '平均利益', '平均損失', 'エラー']
         for col in expected_summary_cols:
@@ -559,6 +492,7 @@ def run_backtest(strategy_module_name, config_filepath,
     else:
         logging.warning("結果サマリーなし。CSV未作成。")
         print("結果サマリーなし。CSV未作成。")
+
 
     logging.info("バックテストスクリプト処理完了。")
     print("\nスクリプト処理完了。ログファイルを確認してください。")

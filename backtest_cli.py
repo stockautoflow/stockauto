@@ -1,4 +1,4 @@
-# backtest_cli.py (修正版 - strategy-moduleの扱い)
+# backtest_cli.py (修正版 - base_interval 引数追加)
 import argparse
 import os
 import sys
@@ -12,12 +12,18 @@ def main():
     parser.add_argument("exec_interval", type=int, help="実行足（分単位）")
     parser.add_argument("context_interval", type=int, help="環境認識足（分単位）")
     parser.add_argument("data_folder_date", type=str, help="株価データ格納フォルダの日付部分 (YYYYMMDD)")
+    parser.add_argument(
+        "--base-interval",
+        type=str,
+        default="1m", # デフォルトは1分足
+        help="リサンプリング元となる基本の足種 (例: 1m, 5m, 1h, D)。CSVファイル名の足種部分と一致させてください。"
+    )
     parser.add_argument("--config", type=str, default="config.yaml", help="設定ファイルへのパス (デフォルト: config.yaml)")
     parser.add_argument(
         "--strategy-module",
         type=str,
         default="strategy",
-        help="戦略モジュール名 (例: strategy, my_strategies.custom1)。拡張子 .py は不要です。" # ヘルプを修正
+        help="戦略モジュール名 (例: strategy, my_strategies.custom1)。拡張子 .py は不要です。"
     )
     parser.add_argument(
         "--chart",
@@ -32,14 +38,12 @@ def main():
     exec_interval_min = args.exec_interval
     context_interval_min = args.context_interval
     date_str = args.data_folder_date
+    base_interval_arg = args.base_interval # 新しい引数を取得
     config_filepath = args.config
     
-    # strategy_module_name_arg から .py 拡張子とパス区切り文字を処理
     strategy_module_input = args.strategy_module
-    # .py 拡張子を除去
     if strategy_module_input.endswith(".py"):
         strategy_module_input = strategy_module_input[:-3]
-    # パス区切り文字をドットに置換 (Pythonモジュール形式へ)
     strategy_module_name_arg = strategy_module_input.replace('/', '.').replace('\\', '.')
 
 
@@ -72,13 +76,14 @@ def main():
             else:
                 if current_invalid_codes :
                     print(f"警告 (CLI): 指定された銘柄コードに有効なものがなかったため、特定の銘柄のグラフは出力されません。")
-                else:
-                    print(f"警告 (CLI): グラフ出力対象の銘柄コードが指定されていません。")
-                print(f"情報 (CLI): 有効な対象銘柄がないため、グラフ出力は行われません。全銘柄を出力する場合は --chart のみ指定してください。")
-                output_chart = False
+                else: # --chart には引数が来たが、それが銘柄コードではなかった場合 (例: --chart non_stock_code)
+                    if args.chart != "ALL_STOCKS": # ALL_STOCKS の場合はすでに上で処理されている
+                        print(f"警告 (CLI): --chart に指定された値 '{args.chart}' は有効な銘柄コードまたは'ALL_STOCKS'ではありません。グラフ出力は行われません。")
+                output_chart = False # 有効な対象銘柄がない場合はグラフ出力しない
     else:
         print("グラフ出力オプション (CLI): グラフは出力されません。")
 
+    # --- 引数バリデーション ---
     if not (1 <= exec_interval_min):
         print(f"エラー (CLI): 実行足インターバル '{exec_interval_min}' は正の整数で指定してください。")
         sys.exit(1)
@@ -94,23 +99,31 @@ def main():
         print(f"エラー (CLI): 日付の形式が正しくありません (例: 20250505)。入力: '{date_str}'")
         sys.exit(1)
 
+    # base_interval_arg の簡単なバリデーション (例: 空でないこと)
+    if not base_interval_arg:
+        print(f"エラー (CLI): 基本足インターバル (--base-interval) を指定してください。")
+        sys.exit(1)
+    # より厳密なバリデーション（特定のフォーマットに一致するかなど）もここに追加可能
+
     if not os.path.isfile(config_filepath):
         print(f"エラー (CLI): 設定ファイルが見つかりません: {config_filepath}")
         sys.exit(1)
 
     try:
         run_backtest(
-            strategy_module_name=strategy_module_name_arg, # 処理済みのモジュール名を渡す
+            strategy_module_name=strategy_module_name_arg,
             config_filepath=config_filepath,
             exec_interval_min=exec_interval_min,
             context_interval_min=context_interval_min,
             date_str=date_str,
+            base_interval_str_arg=base_interval_arg, # 新しい引数を渡す
             output_chart_flag=output_chart,
             target_chart_codes_list=target_chart_codes_for_run,
             invalid_chart_codes_from_cli=invalid_codes_detected_by_cli
         )
     except Exception as e:
         print(f"バックテスト実行中にエラーが発生しました (CLI): {e}", file=sys.stderr)
+        # エラーのスタックトレースは base.py 内のロギングで記録されることを期待
         sys.exit(1)
 
 if __name__ == "__main__":
