@@ -57,7 +57,4 @@ output_chart_on_alert: true      # アラート時にチャートを出力する
 chart_output_directory: "data/realtime_charts" # チャート画像の保存先ディレクトリ
 # num_bars_for_realtime_chart: 200 # リアルタイムチャートに表示する足の本数 (chart.pyのNUM_BARS_TO_DISPLAYとは別に設定する場合)
                                    # chart.pyの定数をそのまま使う場合はこの行は不要
-
-
-
-                                   # realtime_config.yaml
+                                   
