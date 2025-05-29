@@ -41,15 +41,23 @@ state_file_directory: "runtime_state" # 例: プロジェクトルートから�
 
 # --- CSV変換設定 ---
 convert_excel_to_csv_on_startup: true
-excel_file_path: "data/GetStockDataTest.xlsm"  # 実際のExcelファイルパスに置き換えてください
+excel_file_path: "data/GetStockDataTest.xlsm"  # 定期変換および更新監視の対象Excelファイルパス
 csv_output_directory_for_converter: "data/realtime_ohlc" # converter.pyのCSV出力先
 
 # --- 定期CSV変換設定 ---
-enable_periodic_excel_conversion: true # 定期変換を有効にするか (true/false)
+enable_periodic_excel_conversion: false # 定期変換を有効にするか (true/false)
 excel_conversion_interval_minutes: 1   # ExcelからCSVへの変換間隔（分）
+
+# --- Excelファイル更新監視によるCSV変換設定 ---
+enable_excel_conversion_on_update: true # Excelファイル更新時にCSV変換を実行するか (true/false)
+# excel_file_path_to_watch_for_update: "data/GetStockDataRealtime.xlsm" # 更新監視するExcelファイル。excel_file_path と同じで良ければ不要
 
 # --- チャート出力設定 ---
 output_chart_on_alert: true      # アラート時にチャートを出力するか (true/false)
 chart_output_directory: "data/realtime_charts" # チャート画像の保存先ディレクトリ
 # num_bars_for_realtime_chart: 200 # リアルタイムチャートに表示する足の本数 (chart.pyのNUM_BARS_TO_DISPLAYとは別に設定する場合)
                                    # chart.pyの定数をそのまま使う場合はこの行は不要
+
+
+
+                                   # realtime_config.yaml
