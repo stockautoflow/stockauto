@@ -14,9 +14,9 @@ state_file_directory: "runtime_state" # 例: プロジェクトルートから�
 # 処理対象とする銘柄コードのリスト
 # ここの銘柄コードと、data_directory_to_watch 内のファイル名の命名規則を合わせる必要があります。
 # 例: ファイル名が "1332_data.csv" の場合、"1332" をリストに含める
-watched_stock_codes:
-  - "3407"
-  #- "1802"
+# watched_stock_codes:
+  # - "3407"
+  # - "1802"
   # - "1333"
   # - "7203" # 必要に応じて追加
 
