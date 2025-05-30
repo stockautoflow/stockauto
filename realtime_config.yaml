@@ -26,6 +26,11 @@ state_file_directory: "runtime_state" # 例: プロジェクトルートから�
 #   sender_email: "alert_sender@example.com"
 #   recipient_emails:
 #     - "user1@example.com"
+# その他、リアルタイム処理に特有な設定項目があればここに追加
+# 例:
+# data_file_name_pattern: "{code}_kabu_prices.csv" # ファイル名のパターンマッチング用
+# min_bars_for_indicator_calc: 200 # 指標計算に必要な最低バー数 (足生成の参考に)
+# alert_cooldown_period_seconds: 300 # 同一銘柄・同一シグナルでの連続アラート抑制期間（秒）
 
 # --- CSV変換設定 ---
 convert_excel_to_csv_on_startup: true
@@ -50,3 +55,5 @@ enable_excel_conversion_on_update: true # Excelファイル更新時にCSV変換
 # --- チャート出力設定 ---
 output_chart_on_alert: true      # アラート時にチャートを出力するか (true/false)
 chart_output_directory: "data/realtime_charts" # チャート画像の保存先ディレクトリ
+# num_bars_for_realtime_chart: 200 # リアルタイムチャートに表示する足の本数 (chart.pyのNUM_BARS_TO_DISPLAYとは別に設定する場合)
+                                   # chart.pyの定数をそのまま使う場合はこの行は不要
