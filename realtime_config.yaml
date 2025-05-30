@@ -11,16 +11,11 @@ data_directory_to_watch: "data/realtime_ohlc" # 例: プロジェクトルート
 # state_manager.py が銘柄ごとの状態を保存/読み込みするJSONファイルのディレクトリ
 state_file_directory: "runtime_state" # 例: プロジェクトルートからの相対パス
 
-# 処理対象とする銘柄コードのリスト
-# ここの銘柄コードと、data_directory_to_watch 内のファイル名の命名規則を合わせる必要があります。
-# 例: ファイル名が "1332_data.csv" の場合、"1332" をリストに含める
+# 処理対象とする銘柄コードのリスト (この設定はCSVファイル名から動的に取得されるため、このファイルではコメントアウト)
 # watched_stock_codes:
   # - "3407"
-  # - "1802"
-  # - "1333"
-  # - "7203" # 必要に応じて追加
 
-# メール送信設定
+# メール送信設定 (alert_sender.py が email_credentials.yaml を参照するため、ここではコメントアウト)
 # email_settings:
 #   smtp_server: "smtp.gmail.com"
 #   smtp_port: 587 # or 465 for SSL
@@ -31,17 +26,18 @@ state_file_directory: "runtime_state" # 例: プロジェクトルートから�
 #   sender_email: "alert_sender@example.com"
 #   recipient_emails:
 #     - "user1@example.com"
-    # - "user2@example.com"
-
-# その他、リアルタイム処理に特有な設定項目があればここに追加
-# 例:
-# data_file_name_pattern: "{code}_kabu_prices.csv" # ファイル名のパターンマッチング用
-# min_bars_for_indicator_calc: 200 # 指標計算に必要な最低バー数 (足生成の参考に)
-# alert_cooldown_period_seconds: 300 # 同一銘柄・同一シグナルでの連続アラート抑制期間（秒）
 
 # --- CSV変換設定 ---
 convert_excel_to_csv_on_startup: true
-excel_file_path: "data/GetStockDataTest.xlsm"  # 定期変換および更新監視の対象Excelファイルパス
+
+# 監視対象のExcelファイルパスのリスト
+excel_files_to_watch:
+  - "data/GetStockDataTest1-50.xlsm"
+  - "data/GetStockDataTest51-100.xlsm" # 例: 別のExcelファイルを追加する場合
+  - "data/GetStockDataTest101-150.xlsm" # 必要に応じてさらにファイルパスを追加
+  - "data/GetStockDataTest151-200.xlsm" # 必要に応じてさらにファイルパスを追加
+  - "data/GetStockDataTest201-225.xlsm" # 必要に応じてさらにファイルパスを追加
+
 csv_output_directory_for_converter: "data/realtime_ohlc" # converter.pyのCSV出力先
 
 # --- 定期CSV変換設定 ---
@@ -50,11 +46,7 @@ excel_conversion_interval_minutes: 1   # ExcelからCSVへの変換間隔（分�
 
 # --- Excelファイル更新監視によるCSV変換設定 ---
 enable_excel_conversion_on_update: true # Excelファイル更新時にCSV変換を実行するか (true/false)
-# excel_file_path_to_watch_for_update: "data/GetStockDataRealtime.xlsm" # 更新監視するExcelファイル。excel_file_path と同じで良ければ不要
 
 # --- チャート出力設定 ---
 output_chart_on_alert: true      # アラート時にチャートを出力するか (true/false)
 chart_output_directory: "data/realtime_charts" # チャート画像の保存先ディレクトリ
-# num_bars_for_realtime_chart: 200 # リアルタイムチャートに表示する足の本数 (chart.pyのNUM_BARS_TO_DISPLAYとは別に設定する場合)
-                                   # chart.pyの定数をそのまま使う場合はこの行は不要
-                                   
