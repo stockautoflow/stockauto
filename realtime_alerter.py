@@ -2,18 +2,29 @@
 import time
 import logging
 import os
-import yaml # PyYAMLライブラリ
+import yaml
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEventHandler, PatternMatchingEventHandler # PatternMatchingEventHandler をインポート
 import datetime
 import pandas as pd
+import numpy as np
+import schedule
+import shutil
+import tempfile
+import glob
+import re
+
+import matplotlib
+matplotlib.use('Agg')
 
 import state_manager
 import data_processor
-import strategy # strategy.py をインポート
-import alert_sender # alert_sender.py をインポート
+import strategy # strategy モジュールをインポート
+import alert_sender
+import converter
+import chart
 
-# --- ロギング設定 ---
+# --- ロギング設定 (変更なし) ---
 LOG_DIR = "log"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
@@ -23,7 +34,7 @@ log_filename = time.strftime("realtime_alerter_log_%Y%m%d_%H%M%S.log")
 log_filepath = os.path.join(LOG_DIR, log_filename)
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO, # INFOレベルに変更 (DEBUGだと watchdog のログが多くなるため)
     format='%(asctime)s [%(levelname)s] (%(filename)s:%(lineno)d %(funcName)s) %(message)s',
     handlers=[
         logging.FileHandler(log_filepath, encoding='utf-8'),
@@ -33,57 +44,107 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 
-# --- 設定ファイルのパス定義 ---
+# --- 設定ファイルのパス定義 (変更なし) ---
 REALTIME_CONFIG_FILENAME = "realtime_config.yaml"
-STRATEGY_CONFIG_FILENAME = "config.yaml"
+STRATEGY_CONFIG_FILENAME = "config.yaml" # 戦略設定ファイルも定義
 
+# --- load_yaml_config 関数 (変更なし) ---
 def load_yaml_config(filepath):
-    """YAMLファイルを読み込んで辞書として返す"""
     logger.debug(f"設定ファイル読み込み試行: {filepath}")
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             config_data = yaml.safe_load(f)
-            if not config_data: # ファイルは存在するが中身が空、またはYAMLとして無効な場合
+            if not config_data:
                 logger.warning(f"設定ファイル '{filepath}' が空、または有効なYAMLデータを含んでいません。")
-                return {} # 空の辞書を返す
+                return {}
             logger.info(f"設定ファイル '{filepath}' を正常に読み込みました。")
             return config_data
     except FileNotFoundError:
         logger.error(f"エラー: 設定ファイル '{filepath}' が見つかりません。")
-        return None # ファイルが存在しない場合はNoneを返す
+        return None
     except yaml.YAMLError as e:
         logger.error(f"エラー: 設定ファイル '{filepath}' のYAML解析に失敗しました: {e}")
-        return None # 解析失敗時もNoneを返す
+        return None
     except Exception as e:
         logger.error(f"エラー: 設定ファイル '{filepath}' の読み込み中に予期せぬエラーが発生しました: {e}", exc_info=True)
-        return None # その他のエラーでもNoneを返す
+        return None
 
-# --- ファイルイベントハンドラ ---
+# --- excel_to_csv_conversion_job 関数 (変更なし) ---
+def excel_to_csv_conversion_job(excel_path, csv_output_path, job_type="定期実行"):
+    logger.info(f"{job_type} Excel→CSV変換ジョブ実行開始: 元ファイル '{excel_path}'")
+    if not os.path.exists(excel_path):
+        logger.error(f"指定されたExcelファイルが見つかりません: {excel_path}。今回のCSV変換をスキップします。")
+        return
+    if not ensure_directory_exists(csv_output_path):
+        logger.error(f"CSV出力先ディレクトリ '{csv_output_path}' の準備に失敗。今回のCSV変換を中止します。")
+        return
+
+    temp_excel_file = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsm", prefix="excel_copy_") as tmp:
+            temp_excel_file = tmp.name
+        
+        logger.debug(f"元Excelファイルを一時ファイルにコピー中: '{excel_path}' -> '{temp_excel_file}'")
+        shutil.copy2(excel_path, temp_excel_file)
+        logger.debug(f"コピー完了。一時Excelファイルを使用してCSV変換を実行: '{temp_excel_file}' -> '{csv_output_path}'")
+
+        converter.create_csv_from_excel(temp_excel_file, csv_output_path)
+        logger.info(f"{job_type} Excel→CSV変換ジョブ完了。元ファイル: '{excel_path}'")
+
+    except FileNotFoundError as e_fnf:
+        logger.error(f"Excelファイルのコピー中にエラー（ファイルが見つからない等）: {e_fnf}", exc_info=True)
+    except Exception as e_conv:
+        logger.error(f"{job_type} Excel→CSV変換ジョブ中にエラー: {e_conv}", exc_info=True)
+    finally:
+        if temp_excel_file and os.path.exists(temp_excel_file):
+            try:
+                os.remove(temp_excel_file)
+                logger.debug(f"一時Excelファイルを削除しました: '{temp_excel_file}'")
+            except Exception as e_remove:
+                logger.error(f"一時Excelファイル '{temp_excel_file}' の削除中にエラー: {e_remove}")
+
+# --- get_stock_codes_from_data_directory 関数 (変更なし) ---
+def get_stock_codes_from_data_directory(directory_path):
+    if not os.path.isdir(directory_path):
+        logger.warning(f"銘柄コード抽出対象のディレクトリが見つかりません: {directory_path}")
+        return []
+    stock_codes = set()
+    for filepath in glob.glob(os.path.join(directory_path, "*.csv")):
+        filename = os.path.basename(filepath)
+        match = re.match(r"(\d{4})_.*\.csv", filename)
+        if match:
+            stock_codes.add(match.group(1))
+    if not stock_codes:
+        logger.warning(f"ディレクトリ '{directory_path}' 内に処理対象となる株価ファイルが見つかりませんでした。(期待するファイル名形式: XXXX_*.csv)")
+    sorted_codes = sorted(list(stock_codes))
+    logger.info(f"ディレクトリ '{directory_path}' から {len(sorted_codes)} 個のユニークな銘柄コードを抽出しました: {sorted_codes}")
+    return sorted_codes
+
+# --- PriceDataFileEventHandler クラス (変更なし) ---
 class PriceDataFileEventHandler(FileSystemEventHandler):
-    def __init__(self, realtime_config, strategy_config_params): # strategy_config を strategy_config_params に変更
+    def __init__(self, realtime_config, strategy_config_params, dynamic_watched_stock_codes):
         super().__init__()
         self.realtime_config = realtime_config
-        self.strategy_config = strategy_config_params # strategy.load_strategy_config_yaml からロードされたもの
-        self.watched_stock_codes = realtime_config.get('watched_stock_codes', [])
-        self.state_file_dir = realtime_config.get('state_file_directory')
-        if not self.state_file_dir:
-            logger.error("状態ファイルディレクトリが realtime_config に設定されていません。")
-            self.state_file_dir = "default_runtime_state" # フォールバック例
-            ensure_directory_exists(self.state_file_dir)
+        self.strategy_config = strategy_config_params
+        self.watched_stock_codes = dynamic_watched_stock_codes
+        self.state_file_dir = realtime_config.get('state_file_directory', "default_runtime_state")
+        ensure_directory_exists(self.state_file_dir)
+        self.chart_output_on_alert = realtime_config.get('output_chart_on_alert', False)
+        self.chart_output_dir = realtime_config.get('chart_output_directory')
+        if self.chart_output_on_alert and not self.chart_output_dir:
+            logger.warning("アラート時チャート出力が有効ですが、出力先ディレクトリが未設定です。チャートは出力されません。")
+            self.chart_output_on_alert = False
+        elif self.chart_output_on_alert:
+            ensure_directory_exists(self.chart_output_dir)
 
-        # email_config の保持を削除 (alert_sender が直接 email_credentials.yaml を読むため)
-        # logger.info("メール設定は email_credentials.yaml から直接読み込まれます。")
-
-        logger.info(f"監視対象の銘柄コード: {self.watched_stock_codes}")
-        logger.info(f"状態ファイルディレクトリ: {os.path.abspath(self.state_file_dir)}")
-
-        # リアルタイム処理用のパラメータを準備
+        logger.info(f"監視対象の銘柄コード (PriceDataFileEventHandler): {self.watched_stock_codes}")
+        # (残りのコンストラクタ処理は変更なし)
         self.realtime_params_for_strategy = {
             'interval_exec': self.realtime_config.get('execution_interval_minutes', 1),
             'interval_context': self.realtime_config.get('context_interval_minutes', 5),
-            'TRADING_HOURS_FORCE_EXIT_TIME_STR': self.strategy_config.get( # self.strategy_config から取得
+            'TRADING_HOURS_FORCE_EXIT_TIME_STR': self.strategy_config.get(
                 'TRADING_HOURS_FORCE_EXIT_TIME_STR',
-                self.strategy_config.get('TRADING_HOURS', {}).get('FORCE_EXIT_TIME_STR') # ネスト対応
+                self.strategy_config.get('TRADING_HOURS', {}).get('FORCE_EXIT_TIME_STR')
             )
         }
         if self.realtime_params_for_strategy['TRADING_HOURS_FORCE_EXIT_TIME_STR']:
@@ -99,70 +160,73 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
 
 
     def on_modified(self, event):
-        if event.is_directory:
-            return
-
+        if event.is_directory: return
         filepath = event.src_path
         filename = os.path.basename(filepath)
-        logger.debug(f"ファイル変更検知: {filepath}")
-
+        logger.debug(f"CSVファイル変更検知: {filepath}")
         stock_code_match = None
-        for code in self.watched_stock_codes:
-            if filename.startswith(str(code)):
-                stock_code_match = str(code)
-                break
-        
+        if filepath.endswith(".csv"):
+            match = re.match(r"(\d{4})_.*\.csv", filename)
+            if match:
+                extracted_code = match.group(1)
+                if extracted_code in self.watched_stock_codes:
+                    stock_code_match = extracted_code
+                else: logger.debug(f"ファイル '{filename}' の銘柄コード '{extracted_code}' は監視対象外(CSV)。")
+            else: logger.debug(f"ファイル '{filename}' は期待されるCSV命名規則 (XXXX_*.csv) に一致しません。")
         if stock_code_match:
-            logger.info(f"処理対象ファイル更新: {filename} (銘柄コード: {stock_code_match})")
+            logger.info(f"処理対象CSVファイル更新: {filename} (銘柄コード: {stock_code_match})")
             self.process_stock_data(stock_code_match, filepath)
-        else:
-            logger.debug(f"無視するファイル変更: {filename}")
+        else: logger.debug(f"無視するファイル変更 (CSVでないか、対象銘柄コードでない等): {filename}")
 
     def on_created(self, event):
-        if event.is_directory:
-            return
-        logger.debug(f"ファイル作成検知: {event.src_path}")
+        if event.is_directory: return
+        logger.debug(f"CSVファイル作成検知: {event.src_path}")
         self.on_modified(event)
 
-
+    # process_stock_data メソッド (変更なし、長いので省略)
     def process_stock_data(self, stock_code, filepath):
         logger.info(f"--- 銘柄 {stock_code} のデータ処理開始 ({filepath}) ---")
         try:
             current_time_obj = datetime.datetime.now().time()
+            current_datetime_for_filename = datetime.datetime.now()
 
-            current_state = state_manager.load_state(stock_code, self.state_file_dir)
+            current_state = state_manager.load_state(stock_code, self.state_file_dir) 
             logger.debug(f"銘柄 {stock_code}: 状態ロード完了。ポジション: {current_state.get('position')}")
 
-            df_exec, df_context, updated_state = data_processor.load_and_prepare_data_for_strategy(
-                filepath,
-                self.strategy_config, # 戦略パラメータ (config.yaml の内容)
-                current_state.copy()
+            # data_processor.load_and_prepare_data_for_strategy は株価CSVを読み込み、リサンプリングする
+            df_exec_raw, df_context_raw, updated_state_after_data_prep = data_processor.load_and_prepare_data_for_strategy( 
+                filepath, # 更新されたCSVファイルのパス
+                self.strategy_config, # 全体戦略設定
+                current_state.copy()  # 現在の状態
             )
-            current_state = updated_state
+            current_state = updated_state_after_data_prep # 状態を更新
 
-            if df_exec is None or df_exec.empty:
+            if df_exec_raw is None or df_exec_raw.empty:
                 logger.warning(f"銘柄 {stock_code}: 実行足の準備に失敗。処理を中断。")
-                state_manager.save_state(stock_code, current_state, self.state_file_dir)
+                state_manager.save_state(stock_code, current_state, self.state_file_dir) 
                 return
             
-            if df_context is None:
+            if df_context_raw is None: # 環境足がNoneでも警告のみで続行を試みる
                 logger.warning(f"銘柄 {stock_code}: 環境認識足の準備に失敗。空のDataFrameで代替します。")
-                df_context = pd.DataFrame()
+                df_context_raw = pd.DataFrame() # 空のDFで代替
 
-            logger.info(f"銘柄 {stock_code}: 実行足 {len(df_exec)}本、環境認識足 {len(df_context)}本を準備完了。")
+            logger.info(f"銘柄 {stock_code}: 元実行足 {len(df_exec_raw)}本、元環境足 {len(df_context_raw if df_context_raw is not None else [])}本を準備完了。")
 
-            indicators_df = strategy.calculate_indicators(
-                df_exec.copy(),
-                df_context.copy(),
-                self.realtime_params_for_strategy,
-                self.strategy_config # 戦略パラメータ (config.yaml の内容)
+            # strategy.py の関数を呼び出し
+            indicators_df = strategy.calculate_indicators( 
+                df_exec_raw.copy(), 
+                df_context_raw.copy() if df_context_raw is not None else pd.DataFrame(), # Noneでないことを確認
+                self.realtime_params_for_strategy, # リアルタイム用パラメータ
+                self.strategy_config # 全体戦略設定
             )
 
+            df_with_signals_for_chart = pd.DataFrame() # チャート用DF初期化
             if indicators_df is None or indicators_df.empty:
                 logger.warning(f"銘柄 {stock_code}: 指標計算結果が空です。シグナル生成をスキップ。")
-                latest_signal_val = 0
+                latest_signal_val = 0 # シグナルなし
+                df_with_signals_for_chart = df_exec_raw.copy() if df_exec_raw is not None else pd.DataFrame()
             else:
-                signals_df = strategy.generate_signals(
+                signals_df = strategy.generate_signals( 
                     indicators_df.copy(),
                     self.realtime_params_for_strategy,
                     self.strategy_config
@@ -172,30 +236,42 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
                 else:
                     logger.warning(f"銘柄 {stock_code}: シグナル生成結果が空、またはSignalカラムが存在しません。")
                     latest_signal_val = 0
+                df_with_signals_for_chart = signals_df.copy() # チャート用にシグナル付きDFを保持
+            
 
             logger.info(f"銘柄 {stock_code}: シグナル判定結果 (from strategy.py): {latest_signal_val}")
 
             alert_needed = False
             alert_message_subject = ""
             alert_message_body = ""
-            new_position = current_state.get("position", "none")
+            trade_event_for_chart = None # チャート用トレードイベント情報
+            new_position = current_state.get("position", "none") # 現在のポジション
+            position_before_exit = current_state.get("position") # 決済前のポジションを保持
+
+            # ポジション状態を数値に変換 (0:なし, 1:ロング, -1:ショート)
             current_position_val = 0
             if new_position == "long": current_position_val = 1
             elif new_position == "short": current_position_val = -1
 
+            # 決済判断 (ポジションがある場合)
             if current_position_val != 0:
-                if not indicators_df.empty and not indicators_df.iloc[-1].empty:
+                if indicators_df is not None and not indicators_df.empty and len(indicators_df) > 0:
                     current_bar_data_for_exit = indicators_df.iloc[-1]
                     prev_bar_data_for_exit = indicators_df.iloc[-2] if len(indicators_df) >= 2 else pd.Series(dtype='object')
-                    exit_now, exit_reason, _ = strategy.determine_exit_conditions(
+                    
+                    # strategy.determine_exit_conditions を呼び出し
+                    exit_now, exit_reason, _ = strategy.determine_exit_conditions( 
                         current_position_val, current_bar_data_for_exit, prev_bar_data_for_exit,
                         self.realtime_params_for_strategy, self.strategy_config,
                         current_state.get("entry_price"), current_time_obj
                     )
+
                     if exit_now:
                         alert_needed = True
-                        new_position = "none"
-                        exit_price_dummy = df_exec['Close'].iloc[-1] if not df_exec.empty else current_state.get("entry_price", "N/A")
+                        new_position = "none" # ポジションをクリア
+                        # 決済価格は仮に現在の終値とする (リアルタイムでは約定価格を取得する必要がある)
+                        exit_price_dummy = df_exec_raw['Close'].iloc[-1] if df_exec_raw is not None and not df_exec_raw.empty else current_state.get("entry_price", "N/A")
+                        
                         alert_message_subject = f"【決済アラート】銘柄: {stock_code}"
                         alert_message_body = (
                             f"銘柄コード: {stock_code}\n"
@@ -205,61 +281,164 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
                             f"時刻: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                         )
                         logger.info(alert_message_body)
-                        current_state["entry_price"] = None
-                        current_state["entry_datetime"] = None
+                        
+                        trade_event_for_chart = { # チャート用決済イベント
+                            'type': ('Long' if current_position_val == 1 else 'Short'), 
+                            'entry_date': pd.to_datetime(current_state.get("entry_datetime"), errors='coerce'), # エントリー時の情報を引き継ぐ
+                            'entry_price': current_state.get("entry_price"),
+                            'exit_date': df_exec_raw.index[-1] if df_exec_raw is not None and not df_exec_raw.empty else pd.NaT, # 現在のバーの時刻
+                            'exit_price': exit_price_dummy,
+                            'exit_type': exit_reason
+                        }
+                        # 決済時はエントリー情報をクリアする前に、チャート用に決済直前の情報を保持
+                        current_state["position_before_exit_for_chart"] = position_before_exit
+                        current_state["entry_price_before_exit_for_chart"] = current_state.get("entry_price")
+                        current_state["entry_datetime_before_exit_for_chart"] = current_state.get("entry_datetime")
+                        
+                        current_state["entry_price"] = None # エントリー価格クリア
+                        current_state["entry_datetime"] = None # エントリー日時クリア
                 else:
                     logger.warning(f"銘柄 {stock_code}: ポジション保有中だが、決済条件判定のための指標データが不足。")
 
-            if not alert_needed:
-                if current_state.get("position") == "none":
-                    entry_price_dummy = df_exec['Close'].iloc[-1] if not df_exec.empty else None
-                    entry_datetime_dummy = df_exec.index[-1].isoformat() if not df_exec.empty else datetime.datetime.now().isoformat()
-                    if latest_signal_val == 1:
-                        alert_needed = True
+            # エントリー判断 (決済アラートが発生しなかった場合)
+            if not alert_needed: # まだアラートが発生していない場合のみエントリーを検討
+                if current_state.get("position") == "none": # 現在ノーポジションの場合のみ
+                    entry_price_for_chart = df_exec_raw['Close'].iloc[-1] if df_exec_raw is not None and not df_exec_raw.empty else None
+                    entry_datetime_for_chart = df_exec_raw.index[-1] if df_exec_raw is not None and not df_exec_raw.empty else pd.NaT
+                    entry_datetime_for_state = entry_datetime_for_chart.isoformat() if pd.notna(entry_datetime_for_chart) else datetime.datetime.now().isoformat()
+                    
+                    signal_type_str = ""
+                    trade_event_for_chart_type = "" # チャート用
+                    if latest_signal_val == 1: # 買いシグナル
+                        signal_type_str = "新規買い"
                         new_position = "long"
-                        alert_message_subject = f"【新規買いアラート】銘柄: {stock_code}"
-                        alert_message_body = (
-                            f"銘柄コード: {stock_code}\n"
-                            f"シグナル: 新規買い\n"
-                            f"推定エントリー価格: 約{entry_price_dummy}\n"
-                            f"時刻: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                        )
-                        current_state["entry_price"] = entry_price_dummy
-                        current_state["entry_datetime"] = entry_datetime_dummy
-                    elif latest_signal_val == -1:
-                        alert_needed = True
+                        trade_event_for_chart_type = "Long"
+                    elif latest_signal_val == -1: # 売りシグナル
+                        signal_type_str = "新規売り"
                         new_position = "short"
-                        alert_message_subject = f"【新規売りアラート】銘柄: {stock_code}"
+                        trade_event_for_chart_type = "Short"
+
+                    if signal_type_str: # 有効なエントリーシグナルがあった場合
+                        alert_needed = True
+                        alert_message_subject = f"【{signal_type_str}アラート】銘柄: {stock_code}"
                         alert_message_body = (
                             f"銘柄コード: {stock_code}\n"
-                            f"シグナル: 新規売り\n"
-                            f"推定エントリー価格: 約{entry_price_dummy}\n"
+                            f"シグナル: {signal_type_str}\n"
+                            f"推定エントリー価格: 約{entry_price_for_chart}\n" # 仮に現在の終値
                             f"時刻: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                         )
-                        current_state["entry_price"] = entry_price_dummy
-                        current_state["entry_datetime"] = entry_datetime_dummy
-
+                        trade_event_for_chart = { # チャート用エントリーイベント
+                            'type': trade_event_for_chart_type,
+                            'entry_date': entry_datetime_for_chart,
+                            'entry_price': entry_price_for_chart,
+                            'exit_date': pd.NaT, # エントリーなので決済日時はなし
+                            'exit_price': np.nan,
+                            'exit_type': 'N/A_Open' # エントリーなので決済タイプなし
+                        }
+                        current_state["entry_price"] = entry_price_for_chart
+                        current_state["entry_datetime"] = entry_datetime_for_state
+            
+            # ポジション状態の更新
             if new_position != current_state.get("position"):
+                # 決済時で、かつ決済前のポジションが"none"でなかった場合
+                if new_position == "none" and position_before_exit != "none":
+                    pass # エントリー情報はtrade_event_for_chart生成時に利用済み
                 logger.info(f"銘柄 {stock_code}: ポジション変更 {current_state.get('position')} -> {new_position}")
                 current_state["position"] = new_position
-            current_state["last_signal_generated"] = float(latest_signal_val)
 
+            # 最後に生成されたシグナルを状態に保存
+            current_state["last_signal_generated"] = float(latest_signal_val) # floatに変換
+
+            # アラート送信とチャート出力
             if alert_needed:
                 logger.info(f"銘柄 {stock_code}: アラート送信実行！ メッセージ: {alert_message_body}")
-                current_state["last_alert_datetime"] = datetime.datetime.now().isoformat()
-                # alert_sender.send_email の呼び出しから email_config (SMTPサーバー情報) の引数を削除
-                # alert_sender が email_credentials.yaml から全てのメール設定を読み込む
-                email_sent_successfully = alert_sender.send_email(
+                current_state["last_alert_datetime"] = datetime.datetime.now().isoformat() # アラート時刻を記録
+                
+                # メール送信
+                email_sent_successfully = alert_sender.send_email( #
                     alert_message_subject,
                     alert_message_body
                 )
                 if not email_sent_successfully:
                     logger.error(f"銘柄 {stock_code}: メール送信に失敗しました。詳細はalert_senderのログを確認してください。")
+
+                # チャート出力 (アラート発生時のみ)
+                if self.chart_output_on_alert and self.chart_output_dir:
+                    logger.info(f"銘柄 {stock_code}: アラート発生のためチャート出力を試みます。")
+                    try:
+                        trade_history_for_chart_list = []
+                        if trade_event_for_chart:
+                            # チャート関数が期待する形式に合わせる
+                            processed_event_for_chart = {
+                                '銘柄コード': stock_code,
+                                'type': trade_event_for_chart.get('type'),
+                                'entry_date': pd.to_datetime(trade_event_for_chart.get('entry_date'), errors='coerce'),
+                                'entry_price': trade_event_for_chart.get('entry_price'),
+                                'exit_date': pd.to_datetime(trade_event_for_chart.get('exit_date'), errors='coerce'),
+                                'exit_price': trade_event_for_chart.get('exit_price'),
+                                'shares': np.nan, # リアルタイムでは株数不明なのでNaN
+                                'pnl': np.nan,    # リアルタイムでは損益不明なのでNaN
+                                'exit_type': trade_event_for_chart.get('exit_type')
+                            }
+                            # 決済イベントの場合、元のエントリー情報を state から取得して追加（チャート表示用）
+                            if trade_event_for_chart.get('type') != 'Long' and trade_event_for_chart.get('type') != 'Short' and trade_event_for_chart.get('exit_type'): # 決済イベントの場合
+                                processed_event_for_chart['entry_date'] = pd.to_datetime(current_state.get("entry_datetime_before_exit_for_chart"), errors='coerce')
+                                processed_event_for_chart['entry_price'] = current_state.get("entry_price_before_exit_for_chart")
+                                # 元のポジションタイプも復元
+                                processed_event_for_chart['type'] = current_state.get("position_before_exit_for_chart")
+
+                            trade_history_for_chart_list.append(processed_event_for_chart)
+                        
+                        trade_history_df_for_chart = pd.DataFrame(trade_history_for_chart_list)
+                        
+                        # タイムゾーン正規化 (df_exec_raw のタイムゾーンに合わせる)
+                        tz_to_align = df_exec_raw.index.tz if df_exec_raw is not None else None
+                        if tz_to_align:
+                            if 'entry_date' in trade_history_df_for_chart.columns and pd.api.types.is_datetime64_any_dtype(trade_history_df_for_chart['entry_date']):
+                                trade_history_df_for_chart['entry_date'] = trade_history_df_for_chart['entry_date'].apply(
+                                    lambda x: x.tz_localize(None).tz_localize(tz_to_align, ambiguous='infer', nonexistent='NaT') if pd.notna(x) and x.tzinfo is None else (x.tz_convert(tz_to_align) if pd.notna(x) and x.tzinfo is not None and str(x.tzinfo) != str(tz_to_align) else x)
+                                )
+                            if 'exit_date' in trade_history_df_for_chart.columns and pd.api.types.is_datetime64_any_dtype(trade_history_df_for_chart['exit_date']):
+                                trade_history_df_for_chart['exit_date'] = trade_history_df_for_chart['exit_date'].apply(
+                                    lambda x: x.tz_localize(None).tz_localize(tz_to_align, ambiguous='infer', nonexistent='NaT') if pd.notna(x) and x.tzinfo is None else (x.tz_convert(tz_to_align) if pd.notna(x) and x.tzinfo is not None and str(x.tzinfo) != str(tz_to_align) else x)
+                                )
+
+
+                        strategy_name_for_chart = os.path.splitext(os.path.basename(STRATEGY_CONFIG_FILENAME))[0]
+                        interval_exec_str = f"{self.realtime_params_for_strategy['interval_exec']}m"
+                        interval_context_str = f"{self.realtime_params_for_strategy['interval_context']}m"
+                        
+                        base_filename_parts = [ # chart.plot_chart_for_stock が期待する形式に合わせる
+                            strategy_name_for_chart, # base_filename_parts[0]
+                            f"{interval_exec_str}{interval_context_str}", # base_filename_parts[1]
+                            current_datetime_for_filename.strftime('%Y%m%d%H%M%S'), # base_filename_parts[2]
+                            stock_code # base_filename_parts[3]
+                        ]
+
+                        chart.plot_chart_for_stock( # chartモジュールの関数を呼び出し
+                            df_context_raw if df_context_raw is not None and not df_context_raw.empty else pd.DataFrame(),
+                            df_exec_raw if df_exec_raw is not None and not df_exec_raw.empty else pd.DataFrame(),
+                            df_with_signals_for_chart if df_with_signals_for_chart is not None and not df_with_signals_for_chart.empty else pd.DataFrame(),
+                            trade_history_df_for_chart, # 1件のトレードイベントを含むDataFrame
+                            stock_code,
+                            self.strategy_config, # config.yaml の内容
+                            self.chart_output_dir,
+                            base_filename_parts
+                        )
+                        logger.info(f"銘柄 {stock_code}: チャートを出力しました。")
+                    except Exception as e_chart:
+                        logger.error(f"銘柄 {stock_code}: チャート出力中にエラー: {e_chart}", exc_info=True)
             else:
                 logger.info(f"銘柄 {stock_code}: アラート条件に合致せず。")
 
-            current_state['stock_code'] = stock_code
-            state_manager.save_state(stock_code, current_state, self.state_file_dir)
+            # 決済時に保存した一時的な情報をクリーンアップ (任意)
+            current_state.pop("position_before_exit_for_chart", None)
+            current_state.pop("entry_price_before_exit_for_chart", None)
+            current_state.pop("entry_datetime_before_exit_for_chart", None)
+
+            # 状態を保存
+            current_state['stock_code'] = stock_code # 念のためstock_codeを最新に
+            state_manager.save_state(stock_code, current_state, self.state_file_dir) #
             logger.debug(f"銘柄 {stock_code}: 状態保存完了。")
 
             logger.info(f"--- 銘柄 {stock_code} のデータ処理完了 ---")
@@ -268,8 +447,55 @@ class PriceDataFileEventHandler(FileSystemEventHandler):
             logger.error(f"銘柄 {stock_code} の処理中にエラーが発生しました: {e}", exc_info=True)
 
 
+# --- ★ 新規追加: Excelファイル更新イベントハンドラ ---
+class ExcelFileChangeEventHandler(PatternMatchingEventHandler):
+    def __init__(self, excel_filepath_to_watch, csv_output_directory, patterns=None, ignore_patterns=None, ignore_directories=True, case_sensitive=False):
+        super().__init__(patterns=patterns, # キーワード引数として渡す
+                         ignore_patterns=ignore_patterns,
+                         ignore_directories=ignore_directories,
+                         case_sensitive=case_sensitive)
+        self.excel_filepath_to_watch = os.path.abspath(excel_filepath_to_watch)
+        self.csv_output_directory = csv_output_directory
+        self._last_processed_time = 0 # 最後に処理した時刻 (簡易デバウンス用)
+        self._processing_debounce_seconds = 5 # 連続イベントの無視期間（秒）
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+
+        modified_filepath = os.path.abspath(event.src_path)
+        logger.debug(f"Excel監視: ファイル変更検知 - {modified_filepath} (監視対象: {self.excel_filepath_to_watch})")
+
+        if modified_filepath == self.excel_filepath_to_watch:
+            current_time = time.time()
+            if current_time - self._last_processed_time < self._processing_debounce_seconds:
+                logger.info(f"Excelファイル '{os.path.basename(self.excel_filepath_to_watch)}' の更新イベントを短時間で再検知。処理をスキップ（デバウンス）。")
+                return
+
+            logger.info(f"監視対象Excelファイル '{os.path.basename(self.excel_filepath_to_watch)}' が更新されました。CSV変換を開始します。")
+            excel_to_csv_conversion_job(
+                self.excel_filepath_to_watch,
+                self.csv_output_directory,
+                job_type="ファイル更新トリガー"
+            )
+            self._last_processed_time = current_time # 処理時刻を更新
+        else:
+            logger.debug(f"変更されたファイル '{modified_filepath}' は監視対象のExcelファイルではありません。")
+
+    def on_created(self, event):
+        if event.is_directory: return
+        logger.debug(f"Excel監視: ファイル作成検知 - {os.path.abspath(event.src_path)}")
+        self.on_modified(event) # 作成も変更として扱う
+
+    def on_moved(self, event): # Excelが上書き保存されると、一時ファイル作成→リネームで moved イベントが発生することがある
+        if event.is_directory: return
+        moved_to_filepath = os.path.abspath(event.dest_path)
+        logger.debug(f"Excel監視: ファイル移動/リネーム検知 - To: {moved_to_filepath} (監視対象: {self.excel_filepath_to_watch})")
+        if moved_to_filepath == self.excel_filepath_to_watch:
+             self.on_modified(event) # src_path は元の一時ファイル名かもしれないが、dest_path で判断
+# -------------------------------------------------
+
 def ensure_directory_exists(dir_path):
-    """指定されたディレクトリが存在しない場合、作成する"""
     if not os.path.exists(dir_path):
         try:
             os.makedirs(dir_path)
@@ -283,57 +509,112 @@ def main():
     logger.info("リアルタイム株価アラートシステムを開始します...")
 
     realtime_config = load_yaml_config(REALTIME_CONFIG_FILENAME)
-    # strategy.py の関数を使って戦略設定をロードし、フラット化する
+    # strategy.py 内の load_strategy_config_yaml を使用
     strategy_config_params = strategy.load_strategy_config_yaml(STRATEGY_CONFIG_FILENAME)
 
-
-    if realtime_config is None:
-        logger.fatal(f"リアルタイム設定ファイル '{REALTIME_CONFIG_FILENAME}' の読み込みに失敗しました。処理を終了します。")
+    if realtime_config is None or not realtime_config:
+        logger.fatal(f"リアルタイム設定ファイル '{REALTIME_CONFIG_FILENAME}' の読み込み失敗または空です。処理を終了します。")
         return
-    if strategy_config_params is None:
-        logger.fatal(f"戦略設定ファイル '{STRATEGY_CONFIG_FILENAME}' の読み込みに失敗しました。処理を終了します。")
-        return
-    if not realtime_config:
-        logger.fatal(f"リアルタイム設定ファイル '{REALTIME_CONFIG_FILENAME}' が空か無効です。処理を終了します。")
-        return
-    if not strategy_config_params:
-        logger.fatal(f"戦略設定ファイル '{STRATEGY_CONFIG_FILENAME}' が空か、ロード後に有効なパラメータがありません。処理を終了します。")
+    if strategy_config_params is None or not strategy_config_params: # load_strategy_config_yaml は空辞書を返す可能性があるのでチェック
+        logger.fatal(f"戦略設定ファイル '{STRATEGY_CONFIG_FILENAME}' の読み込み失敗または空です。処理を終了します。")
         return
 
-    data_dir_to_watch = realtime_config.get('data_directory_to_watch')
+    # --- 定期的なExcel→CSV変換のスケジュール設定 ---
+    enable_periodic_conversion = realtime_config.get('enable_periodic_excel_conversion', False)
+    excel_file_for_jobs = realtime_config.get('excel_file_path') # 定期・更新監視共通のパス
+    csv_output_dir_for_jobs = realtime_config.get('csv_output_directory_for_converter')
+    conversion_interval_min = realtime_config.get('excel_conversion_interval_minutes', 1)
+
+    if enable_periodic_conversion:
+        if excel_file_for_jobs and csv_output_dir_for_jobs:
+            logger.info(
+                f"定期Excel→CSV変換を {conversion_interval_min} 分ごとにスケジュールします: "
+                f"'{excel_file_for_jobs}' -> '{csv_output_dir_for_jobs}'"
+            )
+            schedule.every(conversion_interval_min).minutes.do(
+                excel_to_csv_conversion_job,
+                excel_path=excel_file_for_jobs,
+                csv_output_path=csv_output_dir_for_jobs,
+                job_type="定期実行"
+            )
+        else:
+            logger.warning("定期Excel→CSV変換が有効ですが、設定（excel_file_path または csv_output_directory_for_converter）が不十分なためスケジュールされません。")
+    else:
+        logger.info("定期Excel→CSV変換は無効に設定されています。")
+
+
+    # --- ディレクトリと監視対象銘柄の準備 ---
+    data_dir_to_watch_for_csv = realtime_config.get('data_directory_to_watch') # CSV株価データの監視ディレクトリ
     state_file_dir = realtime_config.get('state_file_directory')
 
-    if not data_dir_to_watch:
-        logger.error(f"設定ファイル '{REALTIME_CONFIG_FILENAME}' に 'data_directory_to_watch' が指定されていません。処理を終了します。")
+    # 必須ディレクトリのチェックと作成
+    if not all(ensure_directory_exists(d) for d in [data_dir_to_watch_for_csv, state_file_dir, csv_output_dir_for_jobs]):
+        logger.fatal("必須ディレクトリの準備に失敗しました。処理を終了します。")
         return
-    if not state_file_dir:
-        logger.error(f"設定ファイル '{REALTIME_CONFIG_FILENAME}' に 'state_file_directory' が指定されていません。処理を終了します。")
-        return
-
-    if not ensure_directory_exists(data_dir_to_watch):
-        logger.error(f"監視対象ディレクトリ '{data_dir_to_watch}' の準備に失敗しました。処理を終了します。")
-        return
-    if not ensure_directory_exists(state_file_dir):
-        logger.error(f"状態ファイル保存ディレクトリ '{state_file_dir}' の準備に失敗しました。処理を終了します。")
-        return
-
-    logger.info(f"監視対象ディレクトリ: {os.path.abspath(data_dir_to_watch)}")
+    
+    logger.info(f"CSV株価データ監視対象ディレクトリ: {os.path.abspath(data_dir_to_watch_for_csv)}")
     logger.info(f"状態ファイル保存ディレクトリ: {os.path.abspath(state_file_dir)}")
 
-    event_handler = PriceDataFileEventHandler(realtime_config, strategy_config_params)
+    # 監視対象の株価CSVファイルに対応する銘柄コードリストを動的に生成
+    dynamic_watched_codes = get_stock_codes_from_data_directory(data_dir_to_watch_for_csv)
+    if not dynamic_watched_codes:
+        logger.warning(f"監視対象ディレクトリ '{data_dir_to_watch_for_csv}' から処理可能な株価CSVファイルが見つかりませんでした。")
+
+    # --- Observerのセットアップ ---
     observer = Observer()
-    observer.schedule(event_handler, data_dir_to_watch, recursive=False)
+
+    # 1. 株価CSVデータファイルの監視
+    csv_event_handler = PriceDataFileEventHandler(realtime_config, strategy_config_params, dynamic_watched_codes)
+    observer.schedule(csv_event_handler, data_dir_to_watch_for_csv, recursive=False)
+    logger.info(f"株価CSVファイルの監視を開始しました: {data_dir_to_watch_for_csv}")
+
+    # 2. Excelファイルの更新監視 (設定が有効な場合)
+    enable_conversion_on_update = realtime_config.get('enable_excel_conversion_on_update', False)
+    if enable_conversion_on_update:
+        if excel_file_for_jobs and csv_output_dir_for_jobs:
+            # 監視対象はExcelファイルそのものではなく、そのファイルが存在するディレクトリ
+            excel_dir_to_watch = os.path.dirname(os.path.abspath(excel_file_for_jobs))
+            excel_filename_to_watch = os.path.basename(excel_file_for_jobs)
+            
+            if not os.path.exists(excel_file_for_jobs):
+                logger.warning(f"更新監視対象のExcelファイル '{excel_file_for_jobs}' が存在しません。Excel更新監視は開始されません。")
+            else:
+                excel_event_handler = ExcelFileChangeEventHandler(
+                    excel_filepath_to_watch=excel_file_for_jobs,
+                    csv_output_directory=csv_output_dir_for_jobs,
+                    patterns=[f"*{excel_filename_to_watch}"], # 特定のファイル名のみを対象
+                    ignore_patterns=None, # 無視するパターンはなし
+                    ignore_directories=True, # ディレクトリ自体のイベントは無視
+                    case_sensitive=False
+                )
+                observer.schedule(excel_event_handler, excel_dir_to_watch, recursive=False) # 親ディレクトリを監視
+                logger.info(f"Excelファイルの更新監視を開始しました: '{excel_file_for_jobs}' (監視ディレクトリ: '{excel_dir_to_watch}')")
+        else:
+            logger.warning("Excelファイル更新時のCSV変換が有効ですが、設定（excel_file_path または csv_output_directory_for_converter）が不十分なため監視は開始されません。")
+    else:
+        logger.info("Excelファイル更新時のCSV変換は無効に設定されています。")
+
     observer.start()
-    logger.info("ファイル監視を開始しました。Ctrl+Cで終了します。")
+    logger.info("全てのファイル/ディレクトリ監視を開始しました。Ctrl+Cで終了します。")
 
     try:
+        # 初回起動時にExcel→CSV変換を実行（設定が有効な場合）
+        if realtime_config.get('convert_excel_to_csv_on_startup', False):
+            if excel_file_for_jobs and csv_output_dir_for_jobs:
+                logger.info("起動時Excel→CSV変換を実行します...")
+                excel_to_csv_conversion_job(excel_file_for_jobs, csv_output_dir_for_jobs, job_type="起動時")
+            else:
+                logger.warning("起動時Excel→CSV変換が有効ですが、設定が不十分なためスキップします。")
+        
         while True:
+            schedule.run_pending() # スケジュールされたジョブ（定期的Excel変換）を実行
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("キーボード割り込みを受信しました。監視を終了します。")
     except Exception as e:
         logger.error(f"予期せぬエラーにより監視ループが停止しました: {e}", exc_info=True)
     finally:
+        schedule.clear()
         observer.stop()
         observer.join()
         logger.info("リアルタイム株価アラートシステムを終了しました。")
