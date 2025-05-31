@@ -25,18 +25,21 @@ def plot_chart_for_stock(
     base_filename_parts
     ):
     logging.info(f"  銘柄 {stock_code}: チャート生成開始...")
+    logging.debug(f"  銘柄 {stock_code}: plot_chart_for_stock CALLED with df_context_orig len={len(df_context_orig) if df_context_orig is not None else 'None'}, df_exec_orig len={len(df_exec_orig) if df_exec_orig is not None else 'None'}, df_with_signals_orig len={len(df_with_signals_orig) if df_with_signals_orig is not None else 'None'}, trade_history_orig len={len(trade_history_orig) if trade_history_orig is not None else 'None'}")
     p = strategy_params
 
     df_context, df_exec, df_with_signals, trade_history_df = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     min_display_time, max_display_time = None, None
 
     base_df_for_period = df_exec_orig if df_exec_orig is not None and not df_exec_orig.empty else (df_context_orig if df_context_orig is not None and not df_context_orig.empty else None)
+    logging.debug(f"  銘柄 {stock_code}: base_df_for_period selected, len={len(base_df_for_period) if base_df_for_period is not None else 'None'}")
 
     if NUM_BARS_TO_DISPLAY > 0 and base_df_for_period is not None and not base_df_for_period.empty: #
         temp_display_df = base_df_for_period.tail(NUM_BARS_TO_DISPLAY).copy()
         if not temp_display_df.empty:
             min_display_time = temp_display_df.index.min()
             max_display_time = temp_display_df.index.max()
+            logging.debug(f"  銘柄 {stock_code}: Display period (from base_df_for_period.tail): {min_display_time} to {max_display_time}")
         
         if min_display_time is not None and max_display_time is not None:
             if df_exec_orig is not None and not df_exec_orig.empty:
@@ -69,26 +72,36 @@ def plot_chart_for_stock(
                     else:
                         trade_history_df = th_copy.copy()
                     trade_history_df.drop(columns=['entry_date_dt', 'exit_date_dt'], inplace=True, errors='ignore')
+                    logging.debug(f"  銘柄 {stock_code}: trade_history_df filtered, len={len(trade_history_df)}")
                 except Exception as e_th:
                     logging.error(f"  銘柄 {stock_code}: トレード履歴の期間絞り込みエラー: {e_th}")
                     trade_history_df = pd.DataFrame()
-        else:
+        else: # min_display_time or max_display_time is None
             df_exec = df_exec_orig.tail(NUM_BARS_TO_DISPLAY).copy() if df_exec_orig is not None and not df_exec_orig.empty else pd.DataFrame()
             df_context = df_context_orig.tail(NUM_BARS_TO_DISPLAY).copy() if df_context_orig is not None and not df_context_orig.empty else pd.DataFrame()
             df_with_signals = df_with_signals_orig.tail(NUM_BARS_TO_DISPLAY).copy() if df_with_signals_orig is not None and not df_with_signals_orig.empty else pd.DataFrame()
             trade_history_df = trade_history_orig.copy() if trade_history_orig is not None else pd.DataFrame()
-    else:
+            logging.debug(f"  銘柄 {stock_code}: Display period could not be determined from base, using tail({NUM_BARS_TO_DISPLAY}) on all DFs.")
+    else: # NUM_BARS_TO_DISPLAY <= 0 (全期間表示)
         df_context = df_context_orig.copy() if df_context_orig is not None else pd.DataFrame()
         df_exec = df_exec_orig.copy() if df_exec_orig is not None else pd.DataFrame()
         df_with_signals = df_with_signals_orig.copy() if df_with_signals_orig is not None else pd.DataFrame()
         trade_history_df = trade_history_orig.copy() if trade_history_orig is not None else pd.DataFrame()
+        logging.debug(f"  銘柄 {stock_code}: Displaying all bars (NUM_BARS_TO_DISPLAY <= 0).")
+
+    logging.debug(f"  銘柄 {stock_code}: df_context len={len(df_context)}, df_exec len={len(df_exec)}, df_with_signals len={len(df_with_signals)}, trade_history_df len={len(trade_history_df)} after period filtering.")
 
     if df_context.empty and df_exec.empty:
         logging.warning(f"  銘柄 {stock_code}: 表示対象期間の環境認識足・実行足データが共に空のためスキップ。")
         return
 
     def _prepare_plot_df(df_input, df_name_for_log=""):
-        if df_input is None or df_input.empty: return pd.DataFrame(columns=['datetime', 'x_index', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        if df_input is None or df_input.empty:
+            logging.debug(f"  銘柄 {stock_code}: _prepare_plot_df for {df_name_for_log} - input df is None or empty. Returning empty DF.")
+            return pd.DataFrame(columns=['datetime', 'x_index', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        
+        logging.debug(f"  銘柄 {stock_code}: _prepare_plot_df for {df_name_for_log} - input df shape {df_input.shape}, index type: {type(df_input.index)}")
+
         if not isinstance(df_input.index, pd.DatetimeIndex):
             if 'datetime' in df_input.columns:
                 try:
@@ -115,6 +128,7 @@ def plot_chart_for_stock(
             else:
                 logging.warning(f"  銘柄 {stock_code}: {df_name_for_log} の datetimeインデックスまたは列が見つかりません。")
                 return pd.DataFrame(columns=['datetime', 'x_index', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        
         current_index_name = df_input.index.name if df_input.index.name is not None else 'datetime'
         df_plot = df_input.reset_index().rename(columns={current_index_name: 'datetime'})
         if 'datetime' in df_plot.columns:
@@ -126,10 +140,12 @@ def plot_chart_for_stock(
              return pd.DataFrame(columns=['datetime', 'x_index', 'Open', 'High', 'Low', 'Close', 'Volume'])
         if not df_plot.empty: df_plot['x_index'] = np.arange(len(df_plot))
         else: df_plot['x_index'] = pd.Series(dtype='int')
+        logging.debug(f"  銘柄 {stock_code}: _prepare_plot_df for {df_name_for_log} - output df_plot shape {df_plot.shape}")
         return df_plot
 
     df_context_plot = _prepare_plot_df(df_context, "df_context")
     df_exec_plot = _prepare_plot_df(df_exec, "df_exec")
+    logging.debug(f"  銘柄 {stock_code}: df_context_plot len={len(df_context_plot)}, df_exec_plot len={len(df_exec_plot)} after _prepare_plot_df.")
 
     df_with_signals_plot = pd.DataFrame()
     if df_with_signals is not None and not df_with_signals.empty and \
@@ -156,6 +172,8 @@ def plot_chart_for_stock(
     if df_with_signals_plot.empty and df_exec_plot is not None and not df_exec_plot.empty :
         logging.warning(f"  銘柄 {stock_code}: df_with_signals_plot が空。df_exec_plotを指標なしで使用。")
         df_with_signals_plot = df_exec_plot.copy()
+    logging.debug(f"  銘柄 {stock_code}: df_with_signals_plot len={len(df_with_signals_plot)} after merge with exec_plot.")
+
 
     df_ctx_indicators_plot = pd.DataFrame()
     if df_with_signals is not None and not df_with_signals.empty and \
@@ -194,12 +212,15 @@ def plot_chart_for_stock(
         else: logging.warning(f"  銘柄 {stock_code}: 環境足指標のマージに必要なdatetime情報が不足。")
     if df_ctx_indicators_plot.empty and df_context_plot is not None and not df_context_plot.empty:
         df_ctx_indicators_plot = df_context_plot[['datetime', 'x_index']].copy()
+    logging.debug(f"  銘柄 {stock_code}: df_ctx_indicators_plot len={len(df_ctx_indicators_plot)} after merge with context_plot.")
+
 
     num_bars_for_width = len(df_exec_plot) if df_exec_plot is not None and not df_exec_plot.empty else (len(df_context_plot) if df_context_plot is not None else 0)
     if num_bars_for_width > 0 :
         calculated_width = CHART_BASE_WIDTH_INCHES + num_bars_for_width * CHART_WIDTH_PER_BAR_INCHES
         figure_width = max(MIN_CHART_WIDTH_INCHES, min(calculated_width, MAX_CHART_WIDTH_INCHES))
     else: figure_width = MIN_CHART_WIDTH_INCHES
+    logging.debug(f"  銘柄 {stock_code}: Figure width calculated: {figure_width} inches for {num_bars_for_width} bars.")
 
     period_str = f"{NUM_BARS_TO_DISPLAY}bars" if NUM_BARS_TO_DISPLAY > 0 else "All"
     chart_filename = f"Chart_{period_str}_Gapless_{base_filename_parts[3]}_{base_filename_parts[0]}_{base_filename_parts[1]}_{base_filename_parts[2]}.svg"
@@ -233,19 +254,27 @@ def plot_chart_for_stock(
 
     if trade_history_df is not None and not trade_history_df.empty:
         th_copy_for_markers = trade_history_df.copy()
+        logging.debug(f"  銘柄 {stock_code}: plot_chart_for_stock - th_copy_for_markers (渡されたtrade_history_df):\n{th_copy_for_markers.to_string() if not th_copy_for_markers.empty else 'Empty'}")
+
         if 'entry_date' in th_copy_for_markers.columns:
             th_copy_for_markers['entry_date'] = pd.to_datetime(th_copy_for_markers['entry_date'], errors='coerce')
         if 'exit_date' in th_copy_for_markers.columns:
              th_copy_for_markers['exit_date'] = pd.to_datetime(th_copy_for_markers['exit_date'], errors='coerce')
+
         if 'type' in th_copy_for_markers.columns:
             valid_entry_long_condition = (th_copy_for_markers['type'] == 'Long') & \
                                          th_copy_for_markers['entry_date'].notna() & \
                                          th_copy_for_markers['entry_price'].notna()
             buy_entries_for_plot = th_copy_for_markers[valid_entry_long_condition].copy()
+
             valid_entry_short_condition = (th_copy_for_markers['type'] == 'Short') & \
                                           th_copy_for_markers['entry_date'].notna() & \
                                           th_copy_for_markers['entry_price'].notna()
             sell_entries_for_plot = th_copy_for_markers[valid_entry_short_condition].copy()
+        
+        logging.debug(f"  銘柄 {stock_code}: buy_entries_for_plot (after filtering):\n{buy_entries_for_plot.to_string() if not buy_entries_for_plot.empty else 'Empty'}")
+        logging.debug(f"  銘柄 {stock_code}: sell_entries_for_plot (after filtering):\n{sell_entries_for_plot.to_string() if not sell_entries_for_plot.empty else 'Empty'}")
+
         if 'exit_type' in th_copy_for_markers.columns and 'exit_date' in th_copy_for_markers.columns:
             valid_exits = th_copy_for_markers[
                 th_copy_for_markers['exit_date'].notna() & th_copy_for_markers['exit_price'].notna()
@@ -253,6 +282,10 @@ def plot_chart_for_stock(
             if not valid_exits.empty:
                 take_profits_for_plot = valid_exits[valid_exits['exit_type'].astype(str).str.contains("TP", case=False, na=False)].copy()
                 stop_losses_for_plot = valid_exits[valid_exits['exit_type'].astype(str).str.contains("SL", case=False, na=False)].copy()
+        
+        logging.debug(f"  銘柄 {stock_code}: take_profits_for_plot:\n{take_profits_for_plot.to_string() if not take_profits_for_plot.empty else 'Empty'}")
+        logging.debug(f"  銘柄 {stock_code}: stop_losses_for_plot:\n{stop_losses_for_plot.to_string() if not stop_losses_for_plot.empty else 'Empty'}")
+
 
     def plot_ohlc_gapless(ax, df_ohlc_plot_data, ohlc_title, display_x_labels=False):
         if df_ohlc_plot_data is None or df_ohlc_plot_data.empty or 'x_index' not in df_ohlc_plot_data.columns or df_ohlc_plot_data['x_index'].isna().all():
@@ -432,7 +465,7 @@ def plot_chart_for_stock(
     plus_di_col_ctx = 'PLUS_DI_ctx_ITS'
     minus_di_col_ctx = 'MINUS_DI_ctx_ITS'
 
-    if df_ctx_indicators_plot is not None: # df_ctx_indicators_plotがNoneでないことを確認
+    if df_ctx_indicators_plot is not None:
         if adx_col_ctx not in df_ctx_indicators_plot.columns: adx_col_ctx = 'ADX_ctx'
         if plus_di_col_ctx not in df_ctx_indicators_plot.columns: plus_di_col_ctx = 'PLUS_DI_ctx'
         if minus_di_col_ctx not in df_ctx_indicators_plot.columns: minus_di_col_ctx = 'MINUS_DI_ctx'
@@ -440,22 +473,25 @@ def plot_chart_for_stock(
     if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and 'x_index' in df_ctx_indicators_plot.columns:
         adx_plotted = False; plus_di_plotted = False; minus_di_plotted = False
 
+        # ADXプロット
         if adx_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[adx_col_ctx].notna().any():
             adx_thresh = p.get('ADX_SETTINGS_CONTEXT_THRESHOLD', 18.0)
-            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[adx_col_ctx], label='ADX_ctx', color='lime', lw=0.8)
-            ax3.axhline(adx_thresh, color='r', linestyle='--', linewidth=0.7, label=f'ADX Thresh({adx_thresh})')
+            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[adx_col_ctx], label='ADX_ctx', color='deepskyblue', lw=0.8, linestyle='-') # 水色実線
+            ax3.axhline(adx_thresh, color='hotpink', linestyle='--', linewidth=0.7, label=f'ADX Thresh({adx_thresh})') # ピンク破線
             adx_plotted = True; ax3_plot_success = True
         else:
              ax3.text(0.5, 0.7, "Ctx ADX Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
 
+        # DI+ プロット
         if plus_di_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[plus_di_col_ctx].notna().any():
-            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[plus_di_col_ctx], label='DI+_ctx', color='blue', lw=0.8, linestyle='--')
+            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[plus_di_col_ctx], label='DI+_ctx', color='red', lw=0.8, linestyle='-') # 赤色実線
             plus_di_plotted = True; ax3_plot_success = True
         else:
             ax3.text(0.5, 0.5, "Ctx DI+ Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
 
+        # DI- プロット
         if minus_di_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[minus_di_col_ctx].notna().any():
-            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[minus_di_col_ctx], label='DI-_ctx', color='red', lw=0.8, linestyle=':')
+            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[minus_di_col_ctx], label='DI-_ctx', color='green', lw=0.8, linestyle='-') # 緑色実線
             minus_di_plotted = True; ax3_plot_success = True
         else:
             ax3.text(0.5, 0.3, "Ctx DI- Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
