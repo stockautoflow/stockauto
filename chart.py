@@ -233,33 +233,19 @@ def plot_chart_for_stock(
 
     if trade_history_df is not None and not trade_history_df.empty:
         th_copy_for_markers = trade_history_df.copy()
-        logging.debug(f"plot_chart_for_stock - th_copy_for_markers (渡されたtrade_history):\n{th_copy_for_markers.to_string()}")
-
         if 'entry_date' in th_copy_for_markers.columns:
             th_copy_for_markers['entry_date'] = pd.to_datetime(th_copy_for_markers['entry_date'], errors='coerce')
         if 'exit_date' in th_copy_for_markers.columns:
              th_copy_for_markers['exit_date'] = pd.to_datetime(th_copy_for_markers['exit_date'], errors='coerce')
-
-        # --- エントリーマーカー用のDataFrameを生成 ---
-        # バックテスト/リアルタイム共通: 'type' が 'Long'/'Short' であればエントリーマーカーの候補
-        # entry_date と entry_price が有効である必要がある
         if 'type' in th_copy_for_markers.columns:
-            # 全てのトレードがエントリー情報を持つと仮定 (バックテストデータ用)
-            # リアルタイム処理で単一の「決済のみ」イベントが渡された場合、ここではエントリーマーカーは生成されない
             valid_entry_long_condition = (th_copy_for_markers['type'] == 'Long') & \
                                          th_copy_for_markers['entry_date'].notna() & \
                                          th_copy_for_markers['entry_price'].notna()
             buy_entries_for_plot = th_copy_for_markers[valid_entry_long_condition].copy()
-
             valid_entry_short_condition = (th_copy_for_markers['type'] == 'Short') & \
                                           th_copy_for_markers['entry_date'].notna() & \
                                           th_copy_for_markers['entry_price'].notna()
             sell_entries_for_plot = th_copy_for_markers[valid_entry_short_condition].copy()
-        
-        logging.debug(f"plot_chart_for_stock - buy_entries_for_plot (after filtering):\n{buy_entries_for_plot.to_string() if not buy_entries_for_plot.empty else 'Empty'}")
-        logging.debug(f"plot_chart_for_stock - sell_entries_for_plot (after filtering):\n{sell_entries_for_plot.to_string() if not sell_entries_for_plot.empty else 'Empty'}")
-
-        # --- 決済マーカー用のDataFrameを生成 ---
         if 'exit_type' in th_copy_for_markers.columns and 'exit_date' in th_copy_for_markers.columns:
             valid_exits = th_copy_for_markers[
                 th_copy_for_markers['exit_date'].notna() & th_copy_for_markers['exit_price'].notna()
@@ -267,13 +253,8 @@ def plot_chart_for_stock(
             if not valid_exits.empty:
                 take_profits_for_plot = valid_exits[valid_exits['exit_type'].astype(str).str.contains("TP", case=False, na=False)].copy()
                 stop_losses_for_plot = valid_exits[valid_exits['exit_type'].astype(str).str.contains("SL", case=False, na=False)].copy()
-        
-        logging.debug(f"plot_chart_for_stock - take_profits_for_plot:\n{take_profits_for_plot.to_string() if not take_profits_for_plot.empty else 'Empty'}")
-        logging.debug(f"plot_chart_for_stock - stop_losses_for_plot:\n{stop_losses_for_plot.to_string() if not stop_losses_for_plot.empty else 'Empty'}")
-
 
     def plot_ohlc_gapless(ax, df_ohlc_plot_data, ohlc_title, display_x_labels=False):
-        # ... (変更なし) ...
         if df_ohlc_plot_data is None or df_ohlc_plot_data.empty or 'x_index' not in df_ohlc_plot_data.columns or df_ohlc_plot_data['x_index'].isna().all():
             ax.text(0.5, 0.5, f"{ohlc_title}\nNo Data", ha='center', va='center', transform=ax.transAxes, fontsize=10, color='gray')
             ax.set_title(ohlc_title, fontsize=10); ax.set_xticks([]); return False
@@ -305,7 +286,6 @@ def plot_chart_for_stock(
         return True
 
     def plot_markers_gapless(ax, df_ohlc_plot_data, trades_df_for_marker, marker_config, trade_event_details):
-        # ... (変更なし、ただし trade_event_dt の範囲チェックを修正) ...
         if trades_df_for_marker is None or trades_df_for_marker.empty or \
            df_ohlc_plot_data is None or df_ohlc_plot_data.empty or \
            'x_index' not in df_ohlc_plot_data.columns or \
@@ -329,12 +309,9 @@ def plot_chart_for_stock(
                 elif str(trade_event_dt.tzinfo) != str(ohlc_tz): trade_event_dt = trade_event_dt.tz_convert(ohlc_tz)
             elif trade_event_dt.tzinfo is not None: trade_event_dt = trade_event_dt.tz_localize(None)
             if pd.isna(trade_event_dt): continue
-            
-            # df_ohlc_plot_data が空でないことを確認してから min/max を取得
             if df_ohlc_plot_data.empty: continue
             min_ohlc_dt = plot_ohlc_datetime_col.min(); max_ohlc_dt = plot_ohlc_datetime_col.max()
             if pd.isna(min_ohlc_dt) or pd.isna(max_ohlc_dt) or not (min_ohlc_dt <= trade_event_dt <= max_ohlc_dt): continue
-            
             temp_trade_df = pd.DataFrame({'datetime': [trade_event_dt]})
             df_ohlc_plot_data_sorted = df_ohlc_plot_data.sort_values('datetime')
             merged_df = pd.merge_asof(temp_trade_df.sort_values('datetime'), df_ohlc_plot_data_sorted, on='datetime', direction='nearest')
@@ -349,9 +326,7 @@ def plot_chart_for_stock(
             if 'markeredgewidth' in marker_config: plot_kwargs['markeredgewidth'] = marker_config['markeredgewidth']
             ax.plot(plot_x, plot_y, **plot_kwargs)
 
-
     def set_custom_datetime_x_labels(ax, df_plot_data, stock_code_local):
-        # ... (変更なし) ...
         if df_plot_data is None or df_plot_data.empty or 'datetime' not in df_plot_data.columns :
             ax.set_xticks([]); return
         if not pd.api.types.is_datetime64_any_dtype(df_plot_data['datetime']):
@@ -385,13 +360,11 @@ def plot_chart_for_stock(
         else: ax.set_xlim(-0.8, 0.8)
         if not tick_indices_to_plot: ax.set_xticks([])
 
-
-    # --- 1段目: 環境認識足 (変更なし、ただしマーカープロット呼び出しは修正後DataFrame) ---
+    # --- 1段目: 環境認識足 ---
     ax1.set_ylabel("Context Price", fontsize=9)
     plot_context_ohlc_success = plot_ohlc_gapless(ax1, df_context_plot, "Context Candlestick", display_x_labels=False)
     if plot_context_ohlc_success:
         if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and 'x_index' in df_ctx_indicators_plot.columns:
-            # ... (指標プロットは変更なし) ...
             ema_short_period_ctx = p.get('EMA_SETTINGS_CONTEXT_PERIOD_SHORT_GC'); ema_long_period_ctx = p.get('EMA_SETTINGS_CONTEXT_PERIOD_LONG_GC')
             ema_short_col_ctx = f"EMA{ema_short_period_ctx}_ctx_ITS" if ema_short_period_ctx else None
             ema_long_col_ctx = f"EMA{ema_long_period_ctx}_ctx_ITS" if ema_long_period_ctx else None
@@ -430,8 +403,7 @@ def plot_chart_for_stock(
         handles, labels = ax1.get_legend_handles_labels()
         if handles: ax1.legend(handles, labels, fontsize='xx-small', loc='upper left', ncol=max(1, len(handles)//4))
 
-    # --- 2段目: 環境認識足のATR & Volume (変更なし) ---
-    # ... (省略) ...
+    # --- 2段目: 環境認識足のATR & Volume ---
     ax2.set_ylabel("Context ATR/Vol", fontsize=9); ax2_plot_success = False
     if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and 'x_index' in df_ctx_indicators_plot.columns:
         atr_p_ctx_chart = p.get('ATR_SETTINGS_PERIOD_CONTEXT'); atr_col_name_ctx = f'ATR_{atr_p_ctx_chart}_CTX_Chart_ITS' if atr_p_ctx_chart else None
@@ -453,21 +425,50 @@ def plot_chart_for_stock(
     ax2_twin.set_ylabel('Volume_ctx', c='gray', fontsize=9); ax2_twin.tick_params(axis='y', labelcolor='gray', labelsize=8); ax2_twin.set_ylim(bottom=0)
     if ax2_plot_success or ax2_twin_plot_success: ax2.tick_params(labelbottom=False); ax2.set_xticks([])
 
-    # --- 3段目: 環境認識足のADX (変更なし) ---
-    # ... (省略) ...
-    ax3.set_ylabel("Context ADX", fontsize=9); ax3_plot_success = False
+    # --- 3段目: 環境認識足のADX, DI+, DI- (X軸ラベル表示) ---
+    ax3.set_ylabel("Context ADX/DMI", fontsize=9)
+    ax3_plot_success = False
     adx_col_ctx = 'ADX_ctx_ITS'
-    if df_ctx_indicators_plot is not None and adx_col_ctx not in df_ctx_indicators_plot.columns: adx_col_ctx = 'ADX_ctx'
-    if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and adx_col_ctx in df_ctx_indicators_plot.columns and 'x_index' in df_ctx_indicators_plot.columns:
-        adx_thresh = p.get('ADX_SETTINGS_CONTEXT_THRESHOLD', 18.0)
-        if df_ctx_indicators_plot[adx_col_ctx].notna().any():
+    plus_di_col_ctx = 'PLUS_DI_ctx_ITS'
+    minus_di_col_ctx = 'MINUS_DI_ctx_ITS'
+
+    if df_ctx_indicators_plot is not None: # df_ctx_indicators_plotがNoneでないことを確認
+        if adx_col_ctx not in df_ctx_indicators_plot.columns: adx_col_ctx = 'ADX_ctx'
+        if plus_di_col_ctx not in df_ctx_indicators_plot.columns: plus_di_col_ctx = 'PLUS_DI_ctx'
+        if minus_di_col_ctx not in df_ctx_indicators_plot.columns: minus_di_col_ctx = 'MINUS_DI_ctx'
+
+    if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and 'x_index' in df_ctx_indicators_plot.columns:
+        adx_plotted = False; plus_di_plotted = False; minus_di_plotted = False
+
+        if adx_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[adx_col_ctx].notna().any():
+            adx_thresh = p.get('ADX_SETTINGS_CONTEXT_THRESHOLD', 18.0)
             ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[adx_col_ctx], label='ADX_ctx', color='lime', lw=0.8)
-            ax3.axhline(adx_thresh, color='r', linestyle='--', linewidth=0.7, label=f'Thresh({adx_thresh})')
-            ax3_plot_success = True
-            if ax3.has_data(): ax3.legend(fontsize='x-small', loc='upper left'); ax3.tick_params(axis='y', labelsize=8)
-        else: ax3.text(0.5, 0.5, "Ctx ADX Data (All NaN)", ha='center', va='center', fontsize=9, color='gray')
-    else: ax3.text(0.5, 0.5, "Ctx ADX Data Missing", ha='center', va='center', fontsize=9, color='gray')
-    if df_context_plot is not None and not df_context_plot.empty: set_custom_datetime_x_labels(ax3, df_context_plot, stock_code)
+            ax3.axhline(adx_thresh, color='r', linestyle='--', linewidth=0.7, label=f'ADX Thresh({adx_thresh})')
+            adx_plotted = True; ax3_plot_success = True
+        else:
+             ax3.text(0.5, 0.7, "Ctx ADX Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
+
+        if plus_di_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[plus_di_col_ctx].notna().any():
+            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[plus_di_col_ctx], label='DI+_ctx', color='blue', lw=0.8, linestyle='--')
+            plus_di_plotted = True; ax3_plot_success = True
+        else:
+            ax3.text(0.5, 0.5, "Ctx DI+ Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
+
+        if minus_di_col_ctx in df_ctx_indicators_plot.columns and df_ctx_indicators_plot[minus_di_col_ctx].notna().any():
+            ax3.plot(df_ctx_indicators_plot['x_index'], df_ctx_indicators_plot[minus_di_col_ctx], label='DI-_ctx', color='red', lw=0.8, linestyle=':')
+            minus_di_plotted = True; ax3_plot_success = True
+        else:
+            ax3.text(0.5, 0.3, "Ctx DI- Data Missing or All NaN", ha='center', va='center', fontsize=8, color='gray', transform=ax3.transAxes)
+            
+        if ax3_plot_success and ax3.has_data():
+            ax3.legend(fontsize='x-small', loc='upper left')
+            ax3.tick_params(axis='y', labelsize=8)
+            ax3.set_ylim(bottom=0)
+            
+    else: ax3.text(0.5, 0.5, "Ctx ADX/DMI Data Missing", ha='center', va='center', fontsize=9, color='gray')
+
+    if df_context_plot is not None and not df_context_plot.empty:
+        set_custom_datetime_x_labels(ax3, df_context_plot, stock_code)
     else:
         ax3.set_xticks([]); min_x_ax3 = -0.8; max_x_ax3 = 0.8
         if df_ctx_indicators_plot is not None and not df_ctx_indicators_plot.empty and 'x_index' in df_ctx_indicators_plot.columns and df_ctx_indicators_plot['x_index'].notna().any():
@@ -475,12 +476,11 @@ def plot_chart_for_stock(
             if pd.notna(min_x_val) and pd.notna(max_x_val): min_x_ax3=min_x_val; max_x_ax3=max_x_val
         ax3.set_xlim(min_x_ax3 - 0.8, max_x_ax3 + 0.8)
 
-    # --- 4段目: 実行足 (変更なし、ただしマーカープロット呼び出しは修正後DataFrame) ---
+    # --- 4段目: 実行足 ---
     ax4.set_ylabel("Exec Price", fontsize=9)
     plot_exec_ohlc_success = plot_ohlc_gapless(ax4, df_exec_plot, "Execution Candlestick", display_x_labels=False)
     if plot_exec_ohlc_success:
         if df_with_signals_plot is not None and not df_with_signals_plot.empty and 'x_index' in df_with_signals_plot.columns:
-            # ... (指標プロットは変更なし) ...
             ema_s_p_exec = p.get('EMA_SETTINGS_SHORT_EXEC_CHART'); ema_l_p_exec = p.get('EMA_SETTINGS_LONG_EXEC_CHART')
             ema_s_col_exec = f"EMA{ema_s_p_exec}_exec" if ema_s_p_exec else None; ema_l_col_exec = f"EMA{ema_l_p_exec}_exec" if ema_l_p_exec else None
             if ema_s_col_exec and ema_s_col_exec in df_with_signals_plot.columns and df_with_signals_plot[ema_s_col_exec].notna().any():
@@ -510,8 +510,7 @@ def plot_chart_for_stock(
         handles_ax4, labels_ax4 = ax4.get_legend_handles_labels()
         if handles_ax4: ax4.legend(handles_ax4, labels_ax4, fontsize='xx-small', loc='upper left', ncol=max(1, len(handles_ax4)//4))
 
-    # --- 5段目: 実行足のスローストキャスティクス (変更なし) ---
-    # ... (省略) ...
+    # --- 5段目: 実行足のスローストキャスティクス ---
     ax5.set_ylabel("Exec Stoch", fontsize=9); ax5_plot_success = False
     if df_with_signals_plot is not None and not df_with_signals_plot.empty and 'STOCH_K_exec' in df_with_signals_plot.columns and 'STOCH_D_exec' in df_with_signals_plot.columns and 'x_index' in df_with_signals_plot.columns:
         if df_with_signals_plot['STOCH_K_exec'].notna().any() or df_with_signals_plot['STOCH_D_exec'].notna().any() :
@@ -525,8 +524,7 @@ def plot_chart_for_stock(
     else: ax5.text(0.5, 0.5, "Exec Stoch Data Missing", ha='center', va='center', fontsize=9, color='gray')
     if ax5_plot_success: ax5.tick_params(labelbottom=False); ax5.set_xticks([])
 
-    # --- 6段目: 実行足のMACD (変更なし) ---
-    # ... (省略) ...
+    # --- 6段目: 実行足のMACD ---
     ax6.set_ylabel("Exec MACD", fontsize=9); ax6_plot_success = False; macd_hist_ema_data = None
     if df_with_signals_plot is not None and not df_with_signals_plot.empty and 'MACD_exec' in df_with_signals_plot.columns and \
     'MACDsignal_exec' in df_with_signals_plot.columns and 'MACDhist_exec' in df_with_signals_plot.columns and \
@@ -551,8 +549,7 @@ def plot_chart_for_stock(
             ax6.tick_params(axis='y', labelsize=8)
     if ax6_plot_success: ax6.tick_params(labelbottom=False); ax6.set_xticks([])
 
-    # --- 7段目: 実行足のATR & Volume (変更なし) ---
-    # ... (省略) ...
+    # --- 7段目: 実行足のATR & Volume ---
     ax7.set_ylabel("Exec ATR/Vol", fontsize=9); ax7_plot_success = False; ax7_twin_plot_success = False
     if df_exec_plot is not None and not df_exec_plot.empty:
         atr_p_exec_chart = p.get('ATR_SETTINGS_PERIOD_EXEC'); atr_col_name_exec = f'ATR_{atr_p_exec_chart}_EXEC_Chart' if atr_p_exec_chart else None

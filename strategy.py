@@ -1,4 +1,4 @@
-# strategy.py (修正版 - VWAP環境認識戦略追加)
+# strategy.py (修正版 - DMI環境認識戦略追加)
 
 import pandas as pd
 import numpy as np
@@ -145,8 +145,16 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
             else: df_c[f'EMA{ema_short_p_ctx_gc}_ctx'] = np.nan
             if ema_long_p_ctx_gc and len(df_c['Close']) >= ema_long_p_ctx_gc: df_c[f'EMA{ema_long_p_ctx_gc}_ctx'] = talib.EMA(df_c['Close'], timeperiod=ema_long_p_ctx_gc)
             else: df_c[f'EMA{ema_long_p_ctx_gc}_ctx'] = np.nan
-            if adx_ctx_p and len(df_c['High']) >= adx_ctx_p * 2: df_c['ADX_ctx'] = talib.ADX(df_c['High'], df_c['Low'], df_c['Close'], timeperiod=adx_ctx_p)
-            else: df_c['ADX_ctx'] = np.nan
+            
+            if adx_ctx_p and len(df_c['High']) >= adx_ctx_p * 2:
+                df_c['ADX_ctx'] = talib.ADX(df_c['High'], df_c['Low'], df_c['Close'], timeperiod=adx_ctx_p)
+                df_c['PLUS_DI_ctx'] = talib.PLUS_DI(df_c['High'], df_c['Low'], df_c['Close'], timeperiod=adx_ctx_p)
+                df_c['MINUS_DI_ctx'] = talib.MINUS_DI(df_c['High'], df_c['Low'], df_c['Close'], timeperiod=adx_ctx_p)
+            else:
+                df_c['ADX_ctx'] = np.nan
+                df_c['PLUS_DI_ctx'] = np.nan
+                df_c['MINUS_DI_ctx'] = np.nan
+
             if sma1_p_ctx and len(df_c['Close']) >= sma1_p_ctx: df_c[f'SMA{sma1_p_ctx}_ctx'] = talib.SMA(df_c['Close'], timeperiod=sma1_p_ctx)
             else: df_c[f'SMA{sma1_p_ctx}_ctx'] = np.nan
             if sma2_p_ctx and len(df_c['Close']) >= sma2_p_ctx: df_c[f'SMA{sma2_p_ctx}_ctx'] = talib.SMA(df_c['Close'], timeperiod=sma2_p_ctx)
@@ -172,7 +180,8 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
     else:
         for p, col_base in [(ema_short_p_ctx_gc, "EMA"), (ema_long_p_ctx_gc, "EMA"), (sma1_p_ctx, "SMA"), (sma2_p_ctx, "SMA")]:
             df_c[f'{col_base}{p if p else ""}_ctx'] = np.nan
-        df_c['ADX_ctx'] = np.nan; df_c[f'ATR_{atr_ctx_p_chart if atr_ctx_p_chart else ""}_CTX_Chart'] = np.nan
+        df_c['ADX_ctx'] = np.nan; df_c['PLUS_DI_ctx'] = np.nan; df_c['MINUS_DI_ctx'] = np.nan
+        df_c[f'ATR_{atr_ctx_p_chart if atr_ctx_p_chart else ""}_CTX_Chart'] = np.nan
         if atr_ctx_p_for_sl: df_c[f'ATR_{atr_ctx_p_for_sl}_ctx'] = np.nan
         for col_bb in ['BB_Middle_ctx', 'BB_Upper_ctx', 'BB_Lower_ctx'] + [f'BB_Upper_ctx_{i}dev' for i in range(1,4)] + [f'BB_Lower_ctx_{i}dev' for i in range(1,4)]:
             df_c[col_bb] = np.nan
@@ -240,7 +249,7 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
     if ema_long_p_ctx_gc: ctx_cols_to_merge_base.append(f'EMA{ema_long_p_ctx_gc}_ctx')
     if sma1_p_ctx: ctx_cols_to_merge_base.append(f'SMA{sma1_p_ctx}_ctx')
     if sma2_p_ctx: ctx_cols_to_merge_base.append(f'SMA{sma2_p_ctx}_ctx')
-    ctx_cols_to_merge_base.append('ADX_ctx')
+    ctx_cols_to_merge_base.extend(['ADX_ctx', 'PLUS_DI_ctx', 'MINUS_DI_ctx'])
     if atr_ctx_p_chart: ctx_cols_to_merge_base.append(f'ATR_{atr_ctx_p_chart}_CTX_Chart')
     ctx_cols_to_merge_base.extend(['VWAP_daily_ctx', 'BB_Middle_ctx', 'BB_Upper_ctx', 'BB_Lower_ctx'])
     for i in range(1, 4): ctx_cols_to_merge_base.append(f'BB_Upper_ctx_{i}dev'); ctx_cols_to_merge_base.append(f'BB_Lower_ctx_{i}dev')
@@ -254,7 +263,7 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
             if col in df_c_reindexed.columns:
                 df_merged[col + '_ITS'] = df_c_reindexed[col]
         
-        if 'Close' in df_c_reindexed.columns: # df_c からリインデックスされた Close カラム
+        if 'Close' in df_c_reindexed.columns:
             df_merged['Close_ctx_ITS'] = df_c_reindexed['Close']
         else:
             df_merged['Close_ctx_ITS'] = np.nan
@@ -295,7 +304,8 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
     
     use_ema_cross_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_TREND_DIR_EMA_CROSS_ACTIVE', is_activation_flag=True)
     use_adx_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_TREND_STR_ADX_ACTIVE', is_activation_flag=True)
-    use_vwap_trend_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_PRICE_VWAP_RELATION_ACTIVE', is_activation_flag=True) # VWAP戦略フラグ
+    use_vwap_trend_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_PRICE_VWAP_RELATION_ACTIVE', is_activation_flag=True)
+    use_dmi_trend_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_TREND_DIR_DMI_ACTIVE', is_activation_flag=True)
 
     # エントリーパラメータ
     stoch_os = _get_param('STOCH_SETTINGS_OVERSOLD_LEVEL', is_float=True)
@@ -309,14 +319,16 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
     ema_short_col_its = f'EMA{ema_short_p_ctx}_ctx_ITS' if ema_short_p_ctx else None
     ema_long_col_its = f'EMA{ema_long_p_ctx}_ctx_ITS' if ema_long_p_ctx else None
     adx_col_its = 'ADX_ctx_ITS'
-    vwap_col_ctx_its = 'VWAP_daily_ctx_ITS'   # VWAPカラム
-    price_col_ctx_its = 'Close_ctx_ITS'     # 環境認識足の終値カラム
+    vwap_col_ctx_its = 'VWAP_daily_ctx_ITS'
+    price_col_ctx_its = 'Close_ctx_ITS'
+    plus_di_col_its = 'PLUS_DI_ctx_ITS'
+    minus_di_col_its = 'MINUS_DI_ctx_ITS'
 
     stoch_k_col = 'STOCH_K_exec'; stoch_d_col = 'STOCH_D_exec'
     macd_line_col = 'MACD_exec'; macd_signal_col = 'MACDsignal_exec'
     macd_hist_col = 'MACDhist_exec'
     macd_hist_ema_col = 'MACDhist_EMA_exec'
-    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close' # 実行足Close
+    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close'
 
     required_cols_check_map = {
         "EMA_CTX_SHORT_ITS": (ema_short_col_its, use_ema_cross_ctx > 0), 
@@ -324,6 +336,8 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         "ADX_CTX_ITS": (adx_col_its, use_adx_ctx > 0),
         "VWAP_CTX_ITS": (vwap_col_ctx_its, use_vwap_trend_ctx > 0),
         "PRICE_CTX_ITS": (price_col_ctx_its, use_vwap_trend_ctx > 0),
+        "PLUS_DI_CTX_ITS": (plus_di_col_its, use_dmi_trend_ctx > 0),
+        "MINUS_DI_CTX_ITS": (minus_di_col_its, use_dmi_trend_ctx > 0),
         "STOCH_K_EXEC": (stoch_k_col, use_stoch_entry > 0),
         "STOCH_D_EXEC": (stoch_d_col, use_stoch_entry > 0), 
         "MACD_EXEC": (macd_line_col, use_macd_entry > 0),
@@ -393,6 +407,22 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         elif use_vwap_trend_ctx == 1:
             ctx_optional_long_cond_list.append(vwap_trend_up)
             ctx_optional_short_cond_list.append(vwap_trend_down)
+
+    if use_dmi_trend_ctx > 0 and plus_di_col_its in df.columns and minus_di_col_its in df.columns:
+        plus_di = df[plus_di_col_its].ffill().bfill()
+        minus_di = df[minus_di_col_its].ffill().bfill()
+        valid_dmi_data = plus_di.notna() & minus_di.notna()
+        dmi_trend_up = pd.Series(False, index=df.index)
+        dmi_trend_down = pd.Series(False, index=df.index)
+        if valid_dmi_data.any():
+            dmi_trend_up[valid_dmi_data] = plus_di[valid_dmi_data] > minus_di[valid_dmi_data]
+            dmi_trend_down[valid_dmi_data] = minus_di[valid_dmi_data] > plus_di[valid_dmi_data]
+        if use_dmi_trend_ctx == 2:
+            ctx_mandatory_long_cond &= dmi_trend_up
+            ctx_mandatory_short_cond &= dmi_trend_down
+        elif use_dmi_trend_ctx == 1:
+            ctx_optional_long_cond_list.append(dmi_trend_up)
+            ctx_optional_short_cond_list.append(dmi_trend_down)
 
     final_ctx_optional_long_cond = pd.Series(True, index=df.index)
     if ctx_optional_long_cond_list:
