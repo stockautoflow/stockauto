@@ -1,4 +1,4 @@
-# strategy.py (修正版)
+# strategy.py (修正版 - VWAP環境認識戦略追加)
 
 import pandas as pd
 import numpy as np
@@ -15,9 +15,6 @@ except ImportError:
 else:
     YAML_AVAILABLE = True
 
-# CONFIG_FILENAME グローバル変数を削除
-# STRATEGY_PRIMARY_PARAMS のグローバルスコープでの初期化を削除
-
 def flatten_dict(d, parent_key='', sep='_'):
     """ネストした辞書をフラットな辞書に変換する。キーは親キーと結合され、大文字になる。"""
     items = []
@@ -30,19 +27,17 @@ def flatten_dict(d, parent_key='', sep='_'):
                 items.append((new_key.upper(), v))
     return dict(items)
 
-def load_strategy_config_yaml(filename="config.yaml"): # デフォルトファイル名を設定可能にする
+def load_strategy_config_yaml(filename="config.yaml"):
     """
     YAML設定ファイルから戦略パラメータを読み込む。
     ファイルが存在しない、空、または読み込みエラー時は警告を出し、空のフラット辞書を返す。
     """
     if not YAML_AVAILABLE:
-        # logging は base.py で設定されるため、ここでは print を使用
         print(f"[Strategy Warning] PyYAML is not available. Cannot load '{filename}'. Returning empty parameters.")
         return {}
 
     config_params_nested = {}
     if not os.path.exists(filename):
-        # logging は base.py で設定されるため、ここでは print を使用
         print(f"[Strategy Warning] Config file '{filename}' not found. All strategy parameters must be defined in this file.")
     else:
         try:
@@ -50,7 +45,6 @@ def load_strategy_config_yaml(filename="config.yaml"): # デフォルトファ�
                 loaded_yaml = yaml.safe_load(f)
                 if loaded_yaml and isinstance(loaded_yaml, dict):
                     config_params_nested = loaded_yaml
-                    # print(f"[Strategy Info] Loaded parameters from '{filename}'.") # ログは base.py に任せる
                 elif not loaded_yaml:
                     print(f"[Strategy Warning] Config file '{filename}' is empty.")
                 else:
@@ -62,11 +56,10 @@ def load_strategy_config_yaml(filename="config.yaml"): # デフォルトファ�
 
     return flatten_dict(config_params_nested)
 
-# get_merged_param は変更なし、strategy_primary_params_loaded を引数で受け取る
 def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded,
                      is_period=False, is_float=False, is_activation_flag=False, is_bool=False):
     key_upper = key.upper()
-    val_from_config = strategy_primary_params_loaded.get(key_upper) # strategy_primary_params_loaded を使用
+    val_from_config = strategy_primary_params_loaded.get(key_upper)
     val_from_fw = params_from_backtester.get(key)
     if val_from_fw is None:
         val_from_fw = params_from_backtester.get(key_upper)
@@ -76,13 +69,10 @@ def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded
         val = val_from_fw
 
     if val is None:
-        # logging は base.py で設定されるため、ここでは print を使用 (または logging を import して使う)
-        # import logging # この関数内だけで使う場合
-        # logging.warning(f"Parameter '{key_upper}' not found in config or from backtester.")
         print(f"[Strategy Param Warning] Parameter '{key_upper}' not found. Using fallback.")
         if is_activation_flag: return 0
         if is_bool: return False
-        if is_period: return 20 # デフォルト期間のフォールバック値
+        if is_period: return 20
         if is_float: return 0.0
         return None
 
@@ -96,17 +86,14 @@ def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded
         if is_float: return float(val)
         return val
     except (ValueError, TypeError) as e:
-        # import logging
-        # logging.warning(f"Parameter conversion error for key '{key_upper}', value '{val}': {e}. Using fallback.")
         print(f"[Strategy Param Warning] Conversion error for '{key_upper}', value '{val}': {e}. Using fallback.")
         if is_activation_flag: return 0
         if is_bool: return False
-        if is_period: return 20 # デフォルト期間のフォールバック値
+        if is_period: return 20
         if is_float: return 0.0
         return None
 
 def calculate_vwap(df, period='D'):
-    # (変更なし)
     df_copy = df.copy()
     if isinstance(df_copy.index, pd.DatetimeIndex):
         if df_copy.index.tzinfo is None: df_copy.index = df_copy.index.tz_localize('Asia/Tokyo', ambiguous='infer')
@@ -129,13 +116,10 @@ def calculate_vwap(df, period='D'):
         if col_to_drop in df_copy.columns: df_copy.drop(col_to_drop, axis=1, inplace=True)
     return df_copy
 
-# calculate_indicators, generate_signals, determine_exit_conditions は
-# 第３引数に loaded_strategy_params を受け取るように変更
 def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_strategy_params):
     def _get_param(key_name, is_period=False, is_float=False, is_activation_flag=False):
-        return get_merged_param(key_name, params_from_backtester, loaded_strategy_params, # ここで loaded_strategy_params を渡す
+        return get_merged_param(key_name, params_from_backtester, loaded_strategy_params,
                                 is_period, is_float, is_activation_flag)
-    # ... (以降のロジックは STRATEGY_PRIMARY_PARAMS の代わりに loaded_strategy_params を使うように _get_param が変更されたため、間接的に対応)
     df_c = df_context.copy(); df_e = df_exec.copy()
 
     # 環境認識足の指標計算
@@ -156,7 +140,7 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
 
     if not df_c.empty:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning) # talibのNaNに関するWarningを抑制
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             if ema_short_p_ctx_gc and len(df_c['Close']) >= ema_short_p_ctx_gc: df_c[f'EMA{ema_short_p_ctx_gc}_ctx'] = talib.EMA(df_c['Close'], timeperiod=ema_short_p_ctx_gc)
             else: df_c[f'EMA{ema_short_p_ctx_gc}_ctx'] = np.nan
             if ema_long_p_ctx_gc and len(df_c['Close']) >= ema_long_p_ctx_gc: df_c[f'EMA{ema_long_p_ctx_gc}_ctx'] = talib.EMA(df_c['Close'], timeperiod=ema_long_p_ctx_gc)
@@ -179,17 +163,16 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
                 for i in range(1, 4):
                     df_c[f'BB_Upper_ctx_{i}dev'] = df_c['BB_Middle_ctx'] + std_dev_ctx * i
                     df_c[f'BB_Lower_ctx_{i}dev'] = df_c['BB_Middle_ctx'] - std_dev_ctx * i
-                df_c['BB_Upper_ctx'] = df_c['BB_Middle_ctx'] + std_dev_ctx * bb_nbdev_ctx_for_orig # 設定ファイルからのNBDEVを使用
-                df_c['BB_Lower_ctx'] = df_c['BB_Middle_ctx'] - std_dev_ctx * bb_nbdev_ctx_for_orig # 設定ファイルからのNBDEVを使用
+                df_c['BB_Upper_ctx'] = df_c['BB_Middle_ctx'] + std_dev_ctx * bb_nbdev_ctx_for_orig
+                df_c['BB_Lower_ctx'] = df_c['BB_Middle_ctx'] - std_dev_ctx * bb_nbdev_ctx_for_orig
             else:
                 for col_bb in ['BB_Middle_ctx', 'BB_Upper_ctx', 'BB_Lower_ctx'] + [f'BB_Upper_ctx_{i}dev' for i in range(1,4)] + [f'BB_Lower_ctx_{i}dev' for i in range(1,4)]:
                     df_c[col_bb] = np.nan
         df_c = calculate_vwap(df_c); df_c.rename(columns={'VWAP_daily': 'VWAP_daily_ctx'}, inplace=True)
-    else: # df_c が空の場合のフォールバック
+    else:
         for p, col_base in [(ema_short_p_ctx_gc, "EMA"), (ema_long_p_ctx_gc, "EMA"), (sma1_p_ctx, "SMA"), (sma2_p_ctx, "SMA")]:
             df_c[f'{col_base}{p if p else ""}_ctx'] = np.nan
-        df_c['ADX_ctx'] = np.nan
-        df_c[f'ATR_{atr_ctx_p_chart if atr_ctx_p_chart else ""}_CTX_Chart'] = np.nan
+        df_c['ADX_ctx'] = np.nan; df_c[f'ATR_{atr_ctx_p_chart if atr_ctx_p_chart else ""}_CTX_Chart'] = np.nan
         if atr_ctx_p_for_sl: df_c[f'ATR_{atr_ctx_p_for_sl}_ctx'] = np.nan
         for col_bb in ['BB_Middle_ctx', 'BB_Upper_ctx', 'BB_Lower_ctx'] + [f'BB_Upper_ctx_{i}dev' for i in range(1,4)] + [f'BB_Lower_ctx_{i}dev' for i in range(1,4)]:
             df_c[col_bb] = np.nan
@@ -198,39 +181,33 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
     # 実行足の指標計算
     stoch_k_e = _get_param('STOCH_SETTINGS_K_EXEC',is_period=True); stoch_d_e = _get_param('STOCH_SETTINGS_D_EXEC',is_period=True); stoch_smooth_e = _get_param('STOCH_SETTINGS_SMOOTH_EXEC',is_period=True)
     macd_fast_e=_get_param('MACD_SETTINGS_FAST_EXEC',is_period=True); macd_slow_e=_get_param('MACD_SETTINGS_SLOW_EXEC',is_period=True); macd_signal_e=_get_param('MACD_SETTINGS_SIGNAL_EXEC',is_period=True)
-    macd_hist_ema_period_exec = _get_param('MACD_SETTINGS_HIST_EMA_PERIOD_EXEC', is_period=True) # << NEW >> MACDヒストグラムEMAの期間を取得
+    macd_hist_ema_period_exec = _get_param('MACD_SETTINGS_HIST_EMA_PERIOD_EXEC', is_period=True)
     bb_period_e = _get_param('BB_SETTINGS_PERIOD_EXEC', is_period=True); bb_nbdev_e_for_orig = _get_param('BB_SETTINGS_NBDEV_EXEC', is_float=True)
     if bb_nbdev_e_for_orig is None: bb_nbdev_e_for_orig = 2.0
     atr_exec_p_chart = _get_param('ATR_SETTINGS_PERIOD_EXEC', is_period=True)
     sma1_p_exec = _get_param('SMA_SETTINGS_EXEC_PERIOD_1', is_period=True); sma2_p_exec = _get_param('SMA_SETTINGS_EXEC_PERIOD_2', is_period=True)
     ema_s_p_exec_chart = _get_param('EMA_SETTINGS_SHORT_EXEC_CHART', is_period=True); ema_l_p_exec_chart = _get_param('EMA_SETTINGS_LONG_EXEC_CHART', is_period=True)
 
-
     if not df_e.empty:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning) # talibのNaNに関するWarningを抑制
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             for p, col_name_base, suffix in [(ema_s_p_exec_chart,"EMA","_exec"), (ema_l_p_exec_chart,"EMA","_exec"), (sma1_p_exec,"SMA","_exec"), (sma2_p_exec,"SMA","_exec")]:
                 if p and len(df_e['Close']) >= p: df_e[f'{col_name_base}{p}{suffix}'] = getattr(talib, col_name_base)(df_e['Close'], timeperiod=p)
                 else: df_e[f'{col_name_base}{p}{suffix}'] = np.nan
-            
             min_len_stoch = 0
-            if stoch_k_e and stoch_d_e and stoch_smooth_e: min_len_stoch = max(stoch_k_e, stoch_d_e) + stoch_smooth_e -1 # STOCHの最小必要期間をより正確に
-            if all(p is not None for p in [stoch_k_e, stoch_d_e, stoch_smooth_e]) and len(df_e['Close']) >= min_len_stoch: # 修正: STOCHの最小必要期間チェック
+            if stoch_k_e and stoch_d_e and stoch_smooth_e: min_len_stoch = max(stoch_k_e, stoch_d_e) + stoch_smooth_e -1
+            if all(p is not None for p in [stoch_k_e, stoch_d_e, stoch_smooth_e]) and len(df_e['Close']) >= min_len_stoch:
                 df_e['STOCH_K_exec'], df_e['STOCH_D_exec'] = talib.STOCH(df_e['High'], df_e['Low'], df_e['Close'], fastk_period=stoch_k_e, slowk_period=stoch_d_e, slowk_matype=0, slowd_period=stoch_smooth_e, slowd_matype=0)
             else: df_e['STOCH_K_exec'], df_e['STOCH_D_exec'] = np.nan, np.nan
-
-            min_len_macd = 0 # MACDの最小必要期間
+            min_len_macd = 0
             if macd_slow_e and macd_signal_e: min_len_macd = macd_slow_e + macd_signal_e -1 
             if all(p is not None for p in [macd_fast_e, macd_slow_e, macd_signal_e]) and len(df_e['Close']) >= min_len_macd :
                 df_e['MACD_exec'], df_e['MACDsignal_exec'], df_e['MACDhist_exec'] = talib.MACD(df_e['Close'], fastperiod=macd_fast_e, slowperiod=macd_slow_e, signalperiod=macd_signal_e)
             else: df_e['MACD_exec'], df_e['MACDsignal_exec'], df_e['MACDhist_exec'] = np.nan, np.nan, np.nan
-
-            # << NEW >> MACDヒストグラムのEMAを計算
             if macd_hist_ema_period_exec and 'MACDhist_exec' in df_e.columns and df_e['MACDhist_exec'].notna().any() and len(df_e['MACDhist_exec'].dropna()) >= macd_hist_ema_period_exec:
                 df_e[f'MACDhist_EMA_exec'] = talib.EMA(df_e['MACDhist_exec'], timeperiod=macd_hist_ema_period_exec)
             else:
                 df_e[f'MACDhist_EMA_exec'] = np.nan
-            
             if bb_period_e and len(df_e['Close']) >= bb_period_e:
                 df_e['BB_Middle_exec'] = talib.SMA(df_e['Close'], timeperiod=bb_period_e)
                 std_dev_exec = talib.STDDEV(df_e['Close'], timeperiod=bb_period_e, nbdev=1)
@@ -242,40 +219,21 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
             else:
                 for col_bb_e in ['BB_Middle_exec', 'BB_Upper_exec', 'BB_Lower_exec'] + [f'BB_Upper_exec_{i}dev' for i in range(1,4)] + [f'BB_Lower_exec_{i}dev' for i in range(1,4)]:
                     df_e[col_bb_e] = np.nan
-
             if atr_exec_p_chart and len(df_e['High']) >= atr_exec_p_chart: df_e[f'ATR_{atr_exec_p_chart}_EXEC_Chart'] = talib.ATR(df_e['High'], df_e['Low'], df_e['Close'], timeperiod=atr_exec_p_chart)
             else: df_e[f'ATR_{atr_exec_p_chart}_EXEC_Chart'] = np.nan
         df_e = calculate_vwap(df_e); df_e.rename(columns={'VWAP_daily': 'VWAP_daily_exec'}, inplace=True)
-    else: # df_e が空の場合のフォールバック
+    else:
         for p, col_base, suffix in [(ema_s_p_exec_chart,"EMA","_exec"), (ema_l_p_exec_chart,"EMA","_exec"), (sma1_p_exec,"SMA","_exec"), (sma2_p_exec,"SMA","_exec")]:
             df_e[f'{col_base}{p if p else ""}{suffix}'] = np.nan
         for col_nan_e in ['STOCH_K_exec', 'STOCH_D_exec', 'MACD_exec', 'MACDsignal_exec', 'MACDhist_exec', 
-                          f'MACDhist_EMA_exec', # << NEW >>
-                          'BB_Middle_exec', 'BB_Upper_exec', 'BB_Lower_exec', 
+                          f'MACDhist_EMA_exec', 'BB_Middle_exec', 'BB_Upper_exec', 'BB_Lower_exec', 
                           f'ATR_{atr_exec_p_chart if atr_exec_p_chart else ""}_EXEC_Chart', 'VWAP_daily_exec']:
             df_e[col_nan_e] = np.nan
         for i in range(1,4): df_e[f'BB_Upper_exec_{i}dev']=np.nan; df_e[f'BB_Lower_exec_{i}dev']=np.nan
 
-    # 環境認識足の指標をフォワードフィルして実行足のインデックスにマージ
-    df_c_reindexed = pd.DataFrame(index=df_e.index) # 空のDFをdf_eのインデックスで初期化
+    df_c_reindexed = pd.DataFrame(index=df_e.index)
     if not df_c.empty:
-        # df_cのインデックスがdf_eのインデックスの範囲内にあることを確認し、なければffillしない
-        if not df_e.index.is_monotonic_increasing: # ソートされていない場合があるため
-            df_e_sorted_index = df_e.index.sort_values()
-        else:
-            df_e_sorted_index = df_e.index
-            
-        if not df_c.index.is_monotonic_increasing:
-            df_c_sorted_index = df_c.index.sort_values()
-            df_c_temp_sorted = df_c.loc[df_c_sorted_index]
-        else:
-            df_c_temp_sorted = df_c
-
-        if not df_e_sorted_index.empty and not df_c_temp_sorted.empty:
-            # df_eの最初のタイムスタンプより前のdf_cデータは不要なのでフィルタリング（オプション）
-            # df_c_filtered = df_c_temp_sorted[df_c_temp_sorted.index <= df_e_sorted_index[-1]]
-            df_c_reindexed = df_c_temp_sorted.reindex(df_e.index, method='ffill')
-
+        df_c_reindexed = df_c.reindex(df_e.index, method='ffill')
 
     ctx_cols_to_merge_base = []
     if ema_short_p_ctx_gc: ctx_cols_to_merge_base.append(f'EMA{ema_short_p_ctx_gc}_ctx')
@@ -287,28 +245,37 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
     ctx_cols_to_merge_base.extend(['VWAP_daily_ctx', 'BB_Middle_ctx', 'BB_Upper_ctx', 'BB_Lower_ctx'])
     for i in range(1, 4): ctx_cols_to_merge_base.append(f'BB_Upper_ctx_{i}dev'); ctx_cols_to_merge_base.append(f'BB_Lower_ctx_{i}dev')
     
-    # _ITSサフィックスを追加する対象カラムリスト (df_c_reindexedに実際に存在するカラムのみ)
     valid_ctx_cols_for_its_suffix = [col for col in ctx_cols_to_merge_base if col and col in df_c_reindexed.columns]
 
-    if not df_c_reindexed.empty and valid_ctx_cols_for_its_suffix:
-        # df_merged = pd.concat([df_e, df_c_reindexed[valid_ctx_cols_for_its_suffix].add_suffix('_ITS')], axis=1)
-        # concatではなく、df_eに列を直接追加する形でマージする（df_eがベースとなるため）
+    df_merged = df_e.copy()
+
+    if not df_c_reindexed.empty:
         for col in valid_ctx_cols_for_its_suffix:
-            df_e[col + '_ITS'] = df_c_reindexed[col]
-        df_merged = df_e.copy() # この時点でdf_eが必要なカラムを全て含んでいる
-    else: # df_c_reindexed が空、またはマージ対象カラムがない場合
-        df_merged = df_e.copy() # 環境足指標なしで実行足指標のみ
-
-    # ATR損切り用の環境足ATRカラムをマージ (これは_ITSサフィックスをつけない場合があるため別途処理)
-    if atr_ctx_p_for_sl:
-        atr_col_for_sl_name_orig = f'ATR_{atr_ctx_p_for_sl}_ctx'
-        if atr_col_for_sl_name_orig in df_c_reindexed.columns:
-            df_merged[atr_col_for_sl_name_orig] = df_c_reindexed[atr_col_for_sl_name_orig]
-        elif atr_col_for_sl_name_orig not in df_merged.columns: # 既に存在しない場合のみNaNで埋める
-            df_merged[atr_col_for_sl_name_orig] = np.nan
-
-
-    if df_merged.empty and not df_e.empty: df_merged = df_e.copy() # 最終フォールバック
+            if col in df_c_reindexed.columns:
+                df_merged[col + '_ITS'] = df_c_reindexed[col]
+        
+        if 'Close' in df_c_reindexed.columns: # df_c からリインデックスされた Close カラム
+            df_merged['Close_ctx_ITS'] = df_c_reindexed['Close']
+        else:
+            df_merged['Close_ctx_ITS'] = np.nan
+            
+        if atr_ctx_p_for_sl:
+            atr_col_for_sl_name_orig = f'ATR_{atr_ctx_p_for_sl}_ctx'
+            if atr_col_for_sl_name_orig in df_c_reindexed.columns:
+                df_merged[atr_col_for_sl_name_orig] = df_c_reindexed[atr_col_for_sl_name_orig]
+            elif atr_col_for_sl_name_orig not in df_merged.columns:
+                df_merged[atr_col_for_sl_name_orig] = np.nan
+    else: 
+        for col_base_name in ctx_cols_to_merge_base:
+             if (col_base_name + '_ITS') not in df_merged.columns:
+                 df_merged[col_base_name + '_ITS'] = np.nan
+        if 'Close_ctx_ITS' not in df_merged.columns:
+            df_merged['Close_ctx_ITS'] = np.nan
+        if atr_ctx_p_for_sl:
+            atr_col_for_sl_name_orig = f'ATR_{atr_ctx_p_for_sl}_ctx'
+            if atr_col_for_sl_name_orig not in df_merged.columns:
+                 df_merged[atr_col_for_sl_name_orig] = np.nan
+                 
     return df_merged
 
 def generate_signals(df, params_from_backtester, loaded_strategy_params):
@@ -318,84 +285,129 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         return df
 
     def _get_param(key_name, is_period=False, is_float=False, is_activation_flag=False):
-        return get_merged_param(key_name, params_from_backtester, loaded_strategy_params, # loaded_strategy_params を使用
+        return get_merged_param(key_name, params_from_backtester, loaded_strategy_params,
                                 is_period, is_float, is_activation_flag)
-    # ... (以降のロジックは同様)
+
+    # 環境認識パラメータ
     ema_short_p_ctx = _get_param('EMA_SETTINGS_CONTEXT_PERIOD_SHORT_GC', is_period=True)
     ema_long_p_ctx = _get_param('EMA_SETTINGS_CONTEXT_PERIOD_LONG_GC', is_period=True)
     adx_threshold = _get_param('ADX_SETTINGS_CONTEXT_THRESHOLD', is_float=True)
-    stoch_os = _get_param('STOCH_SETTINGS_OVERSOLD_LEVEL', is_float=True)
-    stoch_ob = _get_param('STOCH_SETTINGS_OVERBOUGHT_LEVEL', is_float=True)
     
     use_ema_cross_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_TREND_DIR_EMA_CROSS_ACTIVE', is_activation_flag=True)
     use_adx_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_TREND_STR_ADX_ACTIVE', is_activation_flag=True)
-    
+    use_vwap_trend_ctx = _get_param('ACTIVATION_FLAGS_CONTEXT_PRICE_VWAP_RELATION_ACTIVE', is_activation_flag=True) # VWAP戦略フラグ
+
+    # エントリーパラメータ
+    stoch_os = _get_param('STOCH_SETTINGS_OVERSOLD_LEVEL', is_float=True)
+    stoch_ob = _get_param('STOCH_SETTINGS_OVERBOUGHT_LEVEL', is_float=True)
     use_stoch_entry = _get_param('ACTIVATION_FLAGS_ENTRY_STOCH_ACTIVE', is_activation_flag=True)
     use_macd_entry = _get_param('ACTIVATION_FLAGS_ENTRY_MACD_ACTIVE', is_activation_flag=True)
     use_bb_middle_entry = _get_param('ACTIVATION_FLAGS_ENTRY_BB_MIDDLE_ACTIVE', is_activation_flag=True)
-    use_macd_hist_ema_entry = _get_param('ACTIVATION_FLAGS_ENTRY_MACD_HIST_EMA_ACTIVE', is_activation_flag=True) # << NEW >>
+    use_macd_hist_ema_entry = _get_param('ACTIVATION_FLAGS_ENTRY_MACD_HIST_EMA_ACTIVE', is_activation_flag=True)
 
-
+    # カラム名定義
     ema_short_col_its = f'EMA{ema_short_p_ctx}_ctx_ITS' if ema_short_p_ctx else None
     ema_long_col_its = f'EMA{ema_long_p_ctx}_ctx_ITS' if ema_long_p_ctx else None
     adx_col_its = 'ADX_ctx_ITS'
+    vwap_col_ctx_its = 'VWAP_daily_ctx_ITS'   # VWAPカラム
+    price_col_ctx_its = 'Close_ctx_ITS'     # 環境認識足の終値カラム
+
     stoch_k_col = 'STOCH_K_exec'; stoch_d_col = 'STOCH_D_exec'
     macd_line_col = 'MACD_exec'; macd_signal_col = 'MACDsignal_exec'
-    macd_hist_col = 'MACDhist_exec' # << NEW >>
-    macd_hist_ema_col = 'MACDhist_EMA_exec' # << NEW >>
-    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close'
+    macd_hist_col = 'MACDhist_exec'
+    macd_hist_ema_col = 'MACDhist_EMA_exec'
+    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close' # 実行足Close
 
-    # 必須カラムの存在とNaNチェック
     required_cols_check_map = {
         "EMA_CTX_SHORT_ITS": (ema_short_col_its, use_ema_cross_ctx > 0), 
         "EMA_CTX_LONG_ITS": (ema_long_col_its, use_ema_cross_ctx > 0),
-        "ADX_CTX_ITS": (adx_col_its, use_adx_ctx > 0), 
+        "ADX_CTX_ITS": (adx_col_its, use_adx_ctx > 0),
+        "VWAP_CTX_ITS": (vwap_col_ctx_its, use_vwap_trend_ctx > 0),
+        "PRICE_CTX_ITS": (price_col_ctx_its, use_vwap_trend_ctx > 0),
         "STOCH_K_EXEC": (stoch_k_col, use_stoch_entry > 0),
         "STOCH_D_EXEC": (stoch_d_col, use_stoch_entry > 0), 
         "MACD_EXEC": (macd_line_col, use_macd_entry > 0),
         "MACD_SIGNAL_EXEC": (macd_signal_col, use_macd_entry > 0), 
         "BB_MIDDLE_EXEC": (bb_middle_col, use_bb_middle_entry > 0),
-        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0), # BBミドルエントリーでCloseが必要
-        "MACD_HIST_EXEC": (macd_hist_col, use_macd_hist_ema_entry > 0), # << NEW >>
-        "MACD_HIST_EMA_EXEC": (macd_hist_ema_col, use_macd_hist_ema_entry > 0) # << NEW >>
+        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0),
+        "MACD_HIST_EXEC": (macd_hist_col, use_macd_hist_ema_entry > 0),
+        "MACD_HIST_EMA_EXEC": (macd_hist_ema_col, use_macd_hist_ema_entry > 0)
     }
     missing_or_all_nan_cols = []
     for display_name, (col_name, is_rule_active) in required_cols_check_map.items():
-        if is_rule_active: # ルールが有効な場合のみチェック
+        if is_rule_active:
             if col_name is None or col_name not in df.columns:
                 missing_or_all_nan_cols.append(f"{display_name} (column missing: expected '{col_name}')")
             elif df[col_name].isnull().all():
                 missing_or_all_nan_cols.append(f"{display_name} (column '{col_name}' is all NaN)")
     
     if missing_or_all_nan_cols:
-        # import logging # base.pyで設定されていれば不要
-        # logging.warning(f"Signal Gen: Missing or all NaN for required active columns: {', '.join(missing_or_all_nan_cols)}. Signals will be 0.")
         print(f"[Strategy Signal Warning] Missing or all NaN for required active columns: {', '.join(missing_or_all_nan_cols)}. Signals will be 0.")
         df['Signal'] = 0.0
         return df
 
     # 環境認識フェーズの条件
-    ctx_mandatory_long_cond = pd.Series(True, index=df.index); ctx_mandatory_short_cond = pd.Series(True, index=df.index)
-    # (既存の環境認識ロジック ...)
-    if use_ema_cross_ctx > 0 and ema_short_col_its and ema_long_col_its and ema_short_col_its in df.columns and ema_long_col_its in df.columns:
+    ctx_mandatory_long_cond = pd.Series(True, index=df.index)
+    ctx_mandatory_short_cond = pd.Series(True, index=df.index)
+    ctx_optional_long_cond_list = []
+    ctx_optional_short_cond_list = []
+
+    if use_ema_cross_ctx > 0 and ema_short_col_its and ema_long_col_its and \
+       ema_short_col_its in df.columns and ema_long_col_its in df.columns:
         ema_s = df[ema_short_col_its].ffill().bfill(); ema_l = df[ema_long_col_its].ffill().bfill()
         valid_ema = ema_s.notna() & ema_l.notna()
         ema_trend_up = pd.Series(False, index=df.index); ema_trend_down = pd.Series(False, index=df.index)
-        if valid_ema.any(): ema_trend_up[valid_ema] = ema_s[valid_ema] > ema_l[valid_ema]; ema_trend_down[valid_ema] = ema_s[valid_ema] < ema_l[valid_ema]
-        if use_ema_cross_ctx == 2: ctx_mandatory_long_cond &= ema_trend_up; ctx_mandatory_short_cond &= ema_trend_down
-        # OR条件の扱いはここでは省略（必要なら別途考慮）
-    if use_adx_ctx > 0 and adx_col_its and adx_col_its in df.columns:
-        adx = df[adx_col_its].fillna(0); current_adx_threshold = adx_threshold if adx_threshold is not None else -1
-        adx_strong = adx > current_adx_threshold
-        if use_adx_ctx == 2: ctx_mandatory_long_cond &= adx_strong; ctx_mandatory_short_cond &= adx_strong
-        # OR条件の扱いはここでは省略
+        if valid_ema.any():
+            ema_trend_up[valid_ema] = ema_s[valid_ema] > ema_l[valid_ema]
+            ema_trend_down[valid_ema] = ema_s[valid_ema] < ema_l[valid_ema]
+        if use_ema_cross_ctx == 2:
+            ctx_mandatory_long_cond &= ema_trend_up
+            ctx_mandatory_short_cond &= ema_trend_down
+        elif use_ema_cross_ctx == 1:
+            ctx_optional_long_cond_list.append(ema_trend_up)
+            ctx_optional_short_cond_list.append(ema_trend_down)
 
-    final_env_long_ok = ctx_mandatory_long_cond; final_env_short_ok = ctx_mandatory_short_cond
+    if use_adx_ctx > 0 and adx_col_its and adx_col_its in df.columns:
+        adx = df[adx_col_its].fillna(0)
+        current_adx_threshold = adx_threshold if adx_threshold is not None else -1
+        adx_strong = adx > current_adx_threshold
+        if use_adx_ctx == 2:
+            ctx_mandatory_long_cond &= adx_strong
+            ctx_mandatory_short_cond &= adx_strong
+        elif use_adx_ctx == 1:
+            ctx_optional_long_cond_list.append(adx_strong)
+            ctx_optional_short_cond_list.append(adx_strong)
+
+    if use_vwap_trend_ctx > 0 and vwap_col_ctx_its in df.columns and price_col_ctx_its in df.columns:
+        vwap_ctx = df[vwap_col_ctx_its].ffill().bfill()
+        price_ctx = df[price_col_ctx_its].ffill().bfill()
+        valid_vwap_price = vwap_ctx.notna() & price_ctx.notna()
+        vwap_trend_up = pd.Series(False, index=df.index)
+        vwap_trend_down = pd.Series(False, index=df.index)
+        if valid_vwap_price.any():
+            vwap_trend_up[valid_vwap_price] = price_ctx[valid_vwap_price] > vwap_ctx[valid_vwap_price]
+            vwap_trend_down[valid_vwap_price] = price_ctx[valid_vwap_price] < vwap_ctx[valid_vwap_price]
+        if use_vwap_trend_ctx == 2:
+            ctx_mandatory_long_cond &= vwap_trend_up
+            ctx_mandatory_short_cond &= vwap_trend_down
+        elif use_vwap_trend_ctx == 1:
+            ctx_optional_long_cond_list.append(vwap_trend_up)
+            ctx_optional_short_cond_list.append(vwap_trend_down)
+
+    final_ctx_optional_long_cond = pd.Series(True, index=df.index)
+    if ctx_optional_long_cond_list:
+        final_ctx_optional_long_cond = pd.concat(ctx_optional_long_cond_list, axis=1).any(axis=1)
+    final_ctx_optional_short_cond = pd.Series(True, index=df.index)
+    if ctx_optional_short_cond_list:
+        final_ctx_optional_short_cond = pd.concat(ctx_optional_short_cond_list, axis=1).any(axis=1)
+
+    final_env_long_ok = ctx_mandatory_long_cond & final_ctx_optional_long_cond
+    final_env_short_ok = ctx_mandatory_short_cond & final_ctx_optional_short_cond
 
     # エントリーフェーズの条件
     entry_mandatory_long_cond = pd.Series(True, index=df.index); entry_optional_long_cond_list = []
     entry_mandatory_short_cond = pd.Series(True, index=df.index); entry_optional_short_cond_list = []
-    # (既存のエントリーロジック: STOCH, MACD, BB_MIDDLE)
+
     if use_stoch_entry > 0 and stoch_k_col in df.columns and stoch_d_col in df.columns:
         k = df[stoch_k_col].ffill().bfill().fillna(50); d = df[stoch_d_col].ffill().bfill().fillna(50)
         k_prev = k.shift(1).ffill().bfill().fillna(50); d_prev = d.shift(1).ffill().bfill().fillna(50)
@@ -407,7 +419,7 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
     
     if use_macd_entry > 0 and macd_line_col in df.columns and macd_signal_col in df.columns:
         macd_l = df[macd_line_col].ffill().bfill().fillna(0); macd_s = df[macd_signal_col].ffill().bfill().fillna(0)
-        macd_buy_trigger = macd_l > macd_s; macd_sell_trigger = macd_l < macd_s # 単純なクロスのみ（改良の余地あり）
+        macd_buy_trigger = macd_l > macd_s; macd_sell_trigger = macd_l < macd_s 
         if use_macd_entry == 2: entry_mandatory_long_cond &= macd_buy_trigger; entry_mandatory_short_cond &= macd_sell_trigger
         elif use_macd_entry == 1: entry_optional_long_cond_list.append(macd_buy_trigger); entry_optional_short_cond_list.append(macd_sell_trigger)
 
@@ -419,76 +431,53 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         if use_bb_middle_entry == 2: entry_mandatory_long_cond &= bb_buy_trigger; entry_mandatory_short_cond &= bb_sell_trigger
         elif use_bb_middle_entry == 1: entry_optional_long_cond_list.append(bb_buy_trigger); entry_optional_short_cond_list.append(bb_sell_trigger)
 
-    # << NEW >> MACDヒストグラムEMAを使ったエントリーロジック
     if use_macd_hist_ema_entry > 0 and macd_hist_col in df.columns and macd_hist_ema_col in df.columns:
         hist = df[macd_hist_col].ffill().bfill().fillna(0)
         hist_ema = df[macd_hist_ema_col].ffill().bfill().fillna(0)
-        hist_prev = hist.shift(1).ffill().bfill().fillna(0) # 1本前のヒストグラム
-        hist_ema_prev = hist_ema.shift(1).ffill().bfill().fillna(0) # 1本前のヒストグラムEMA
-
-        # 例: ヒストグラムがEMAをゴールデンクロス / デッドクロス
+        hist_prev = hist.shift(1).ffill().bfill().fillna(0)
+        hist_ema_prev = hist_ema.shift(1).ffill().bfill().fillna(0)
         hist_ema_buy_trigger = (hist_prev <= hist_ema_prev) & (hist > hist_ema)
         hist_ema_sell_trigger = (hist_prev >= hist_ema_prev) & (hist < hist_ema)
-        
-        # 他の条件も考慮可能:
-        # hist_ema_buy_trigger = hist > hist_ema # 単純にヒストグラムがEMAより上
-        # hist_ema_sell_trigger = hist < hist_ema # 単純にヒストグラムがEMAより下
-        # hist_ema_buy_trigger = (hist > 0) & (hist_ema > 0) & (hist > hist_ema) # 両方プラス圏でGC
-        # hist_ema_sell_trigger = (hist < 0) & (hist_ema < 0) & (hist < hist_ema) # 両方マイナス圏でDC
-
-        if use_macd_hist_ema_entry == 2: # AND条件として追加
+        if use_macd_hist_ema_entry == 2:
             entry_mandatory_long_cond &= hist_ema_buy_trigger
             entry_mandatory_short_cond &= hist_ema_sell_trigger
-        elif use_macd_hist_ema_entry == 1: # OR条件として追加
+        elif use_macd_hist_ema_entry == 1:
             entry_optional_long_cond_list.append(hist_ema_buy_trigger)
             entry_optional_short_cond_list.append(hist_ema_sell_trigger)
 
-    # 最終的なエントリーシグナルの決定
-    final_optional_long_cond = pd.Series(False, index=df.index)
+    final_entry_optional_long_cond = pd.Series(True, index=df.index)
     if entry_optional_long_cond_list:
-        for cond in entry_optional_long_cond_list: final_optional_long_cond |= cond
-    else: # OR条件が一つも設定されていなければ、AND条件のみで決まるのでTrue扱い
-        final_optional_long_cond = pd.Series(True, index=df.index)
-        if not any([use_stoch_entry == 1, use_macd_entry == 1, use_bb_middle_entry == 1, use_macd_hist_ema_entry == 1]): # OR条件フラグが全て0の場合
-             pass # AND条件のみで判定されるため、このままで良い
-
-    final_optional_short_cond = pd.Series(False, index=df.index)
+        final_entry_optional_long_cond = pd.concat(entry_optional_long_cond_list, axis=1).any(axis=1)
+    final_entry_optional_short_cond = pd.Series(True, index=df.index)
     if entry_optional_short_cond_list:
-        for cond in entry_optional_short_cond_list: final_optional_short_cond |= cond
-    else: # OR条件が一つも設定されていなければ、AND条件のみで決まるのでTrue扱い
-        final_optional_short_cond = pd.Series(True, index=df.index)
-        if not any([use_stoch_entry == 1, use_macd_entry == 1, use_bb_middle_entry == 1, use_macd_hist_ema_entry == 1]):
-            pass
+        final_entry_optional_short_cond = pd.concat(entry_optional_short_cond_list, axis=1).any(axis=1)
 
-
-    buy_signal_series = final_env_long_ok & entry_mandatory_long_cond & final_optional_long_cond
-    sell_signal_series = final_env_short_ok & entry_mandatory_short_cond & final_optional_short_cond
+    final_entry_long_ok = entry_mandatory_long_cond & final_entry_optional_long_cond
+    final_entry_short_ok = entry_mandatory_short_cond & final_entry_optional_short_cond
+    
+    buy_signal_series = final_env_long_ok & final_entry_long_ok
+    sell_signal_series = final_env_short_ok & final_entry_short_ok
     
     signals.loc[buy_signal_series] = 1.0
     signals.loc[sell_signal_series] = -1.0
-    signals.loc[buy_signal_series & sell_signal_series] = 0.0 # LongとShortが同時に発生した場合はシグナルなし
+    signals.loc[buy_signal_series & sell_signal_series] = 0.0
     
     df['Signal'] = signals.fillna(0.0)
     return df
 
 def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
-                              params_from_backtester, loaded_strategy_params, # loaded_strategy_params を追加
+                              params_from_backtester, loaded_strategy_params,
                               entry_price=None, current_bar_time=None):
     if current_position == 0: return False, "", None
 
-    # merged_params_for_exit を作成
-    merged_params_for_exit = loaded_strategy_params.copy() # まず config からロードされたもの
-    if params_from_backtester: # FWからの動的パラメータで上書き/追加
-        # FWからのパラメータキーも大文字に統一してマージする
+    merged_params_for_exit = loaded_strategy_params.copy()
+    if params_from_backtester:
         flat_fw_params = {k.upper() if isinstance(k, str) else k: v for k,v in params_from_backtester.items()}
         merged_params_for_exit.update(flat_fw_params)
 
     def _get_exit_param(key_name_upper, is_float=False, is_activation_flag=False, is_bool=False):
-        # merged_params_for_exit から取得するように修正
-        val = merged_params_for_exit.get(key_name_upper.upper()) # キーを大文字で統一して検索
+        val = merged_params_for_exit.get(key_name_upper.upper())
         if val is None:
-            # import logging
-            # logging.warning(f"Exit Param '{key_name_upper}' not found. Using fallback.")
             print(f"[Strategy Exit Param Warning] Param '{key_name_upper}' not found. Using fallback.")
             if is_activation_flag: return 0
             if is_bool: return False
@@ -503,24 +492,21 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
             if is_float: return float(val)
             return val
         except (ValueError, TypeError):
-            # import logging
-            # logging.warning(f"Exit Param convert error for '{key_name_upper}', val '{val}'. Using fallback.")
             print(f"[Strategy Exit Param Warning] Conversion error for '{key_name_upper}', val '{val}'. Using fallback.")
             if is_activation_flag: return 0
             if is_bool: return False
             if is_float: return 0.0
             return None
-    # ... (以降のロジックは同様)
+            
     exit_reason_list = []; exit_now = False
 
-    # --- 損切りロジック ---
     sl_stoch_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_STOCH_REVERSE_ACTIVE', is_activation_flag=True)
     sl_macd_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_MACD_REVERSE_ACTIVE', is_activation_flag=True)
     sl_bb_middle_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE', is_activation_flag=True)
     sl_atr_multiple = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_ATR_MULTIPLE', is_float=True)
-    sl_macd_hist_ema_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE', is_activation_flag=True) # << NEW >>
+    sl_macd_hist_ema_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE', is_activation_flag=True)
     
-    atr_period_for_sl_ctx_val = _get_exit_param('ATR_SETTINGS_STOP_PERIOD_CONTEXT') # 大文字キーでアクセス
+    atr_period_for_sl_ctx_val = _get_exit_param('ATR_SETTINGS_STOP_PERIOD_CONTEXT')
     atr_period_for_sl_ctx = None
     if atr_period_for_sl_ctx_val is not None:
         try: atr_period_for_sl_ctx = int(float(atr_period_for_sl_ctx_val))
@@ -555,38 +541,34 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
                 sl_price_atr = entry_price + (current_atr_val * sl_atr_multiple)
                 if current_high >= sl_price_atr: exit_reason_list.append(f"SL:ATR Hit (S)")
 
-    # << NEW >> MACDヒストグラムEMAを使った損切りロジック
     if sl_macd_hist_ema_active > 0:
         hist_curr = current_bar_data.get('MACDhist_exec')
         hist_ema_curr = current_bar_data.get('MACDhist_EMA_exec')
         if hist_curr is not None and hist_ema_curr is not None and not (np.isnan(hist_curr) or np.isnan(hist_ema_curr)):
-            if current_position == 1 and hist_curr < hist_ema_curr: # ロングポジションでヒストグラムがEMAを下抜け
+            if current_position == 1 and hist_curr < hist_ema_curr:
                 exit_reason_list.append("SL:MACDhist<EMA")
-            elif current_position == -1 and hist_curr > hist_ema_curr: # ショートポジションでヒストグラムがEMAを上抜け
+            elif current_position == -1 and hist_curr > hist_ema_curr:
                 exit_reason_list.append("SL:MACDhist>EMA")
 
-    if exit_reason_list: # 損切り条件が一つでも成立したら決済
+    if exit_reason_list:
         exit_now = True
     else:
-        # --- 利確ロジック (損切りが発生しなかった場合のみ評価) ---
         tp_stoch_active = _get_exit_param('ACTIVATION_FLAGS_TAKE_PROFIT_STOCH_EXTREME_REVERSE_ACTIVE', is_activation_flag=True)
         tp_macd_hist_active = _get_exit_param('ACTIVATION_FLAGS_TAKE_PROFIT_MACD_HIST_REVERSE_ACTIVE', is_activation_flag=True)
         tp_bb_touch_active = _get_exit_param('ACTIVATION_FLAGS_TAKE_PROFIT_BB_EXTREME_TOUCH_ACTIVE', is_activation_flag=True)
-        tp_macd_hist_ema_active = _get_exit_param('ACTIVATION_FLAGS_TAKE_PROFIT_MACD_HIST_EMA_REVERSE_ACTIVE', is_activation_flag=True) # << NEW >>
-        
+        tp_macd_hist_ema_active = _get_exit_param('ACTIVATION_FLAGS_TAKE_PROFIT_MACD_HIST_EMA_REVERSE_ACTIVE', is_activation_flag=True)
         stoch_ob_level = _get_exit_param('STOCH_SETTINGS_OVERBOUGHT_LEVEL', is_float=True)
         stoch_os_level = _get_exit_param('STOCH_SETTINGS_OVERSOLD_LEVEL', is_float=True)
 
         if tp_stoch_active > 0 and stoch_ob_level is not None and stoch_os_level is not None:
-            s_k_curr = current_bar_data.get('STOCH_K_exec'); s_k_prev = prev_bar_data.get('STOCH_K_exec') # prev_bar_dataから取得
+            s_k_curr = current_bar_data.get('STOCH_K_exec'); s_k_prev = prev_bar_data.get('STOCH_K_exec')
             if s_k_curr is not None and s_k_prev is not None and not (np.isnan(s_k_curr) or np.isnan(s_k_prev)):
                 if current_position == 1 and s_k_prev >= stoch_ob_level and s_k_curr < s_k_prev: exit_reason_list.append("TP:Stoch_OB_Reverse")
                 elif current_position == -1 and s_k_prev <= stoch_os_level and s_k_curr > s_k_prev: exit_reason_list.append("TP:Stoch_OS_Reverse")
         
         if tp_macd_hist_active > 0:
-            m_hist_curr = current_bar_data.get('MACDhist_exec'); m_hist_prev = prev_bar_data.get('MACDhist_exec') # prev_bar_dataから取得
+            m_hist_curr = current_bar_data.get('MACDhist_exec'); m_hist_prev = prev_bar_data.get('MACDhist_exec')
             if m_hist_curr is not None and m_hist_prev is not None and not (np.isnan(m_hist_curr) or np.isnan(m_hist_prev)):
-                # 例: ヒストグラムがピークアウト（ロングの場合、プラス圏で減少開始。ショートの場合、マイナス圏で増加開始）
                 if current_position == 1 and m_hist_prev > 0 and m_hist_curr < m_hist_prev : exit_reason_list.append("TP:MACD_Hist_PeakOut")
                 elif current_position == -1 and m_hist_prev < 0 and m_hist_curr > m_hist_prev: exit_reason_list.append("TP:MACD_Hist_PeakOut")
         
@@ -598,32 +580,28 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
                 if current_position == 1 and high_price >= bb_upper: exit_reason_list.append("TP:BB_UpTouch")
                 elif current_position == -1 and low_price <= bb_lower: exit_reason_list.append("TP:BB_LowTouch")
 
-        # << NEW >> MACDヒストグラムEMAを使った利確ロジック
         if tp_macd_hist_ema_active > 0:
             hist_ema_curr = current_bar_data.get('MACDhist_EMA_exec')
-            hist_ema_prev = prev_bar_data.get('MACDhist_EMA_exec') # prev_bar_dataから取得
+            hist_ema_prev = prev_bar_data.get('MACDhist_EMA_exec')
             if hist_ema_curr is not None and hist_ema_prev is not None and not (np.isnan(hist_ema_curr) or np.isnan(hist_ema_prev)):
-                # 例: EMAの傾きが反転
-                if current_position == 1 and hist_ema_curr < hist_ema_prev: # ロングでEMAが下降に転じた
+                if current_position == 1 and hist_ema_curr < hist_ema_prev:
                     exit_reason_list.append("TP:MACDhist_EMA_TurnDn")
-                elif current_position == -1 and hist_ema_curr > hist_ema_prev: # ショートでEMAが上昇に転じた
+                elif current_position == -1 and hist_ema_curr > hist_ema_prev:
                     exit_reason_list.append("TP:MACDhist_EMA_TurnUp")
-
-        if exit_reason_list: # 利確条件が一つでも成立したら決済
+        if exit_reason_list:
             exit_now = True
 
-    # 強制決済時刻のチェック (損切り・利確条件が発動しなかった場合)
     if not exit_now and current_bar_time is not None:
         considers_force_exit_val = _get_exit_param('ACTIVATION_FLAGS_STRATEGY_CONSIDERS_FORCE_EXIT_TIME', is_activation_flag=True)
-        force_exit_time_obj = merged_params_for_exit.get('PARSED_FORCE_EXIT_TIME_OBJ') # base.pyから渡される想定
+        force_exit_time_obj = merged_params_for_exit.get('PARSED_FORCE_EXIT_TIME_OBJ')
 
         if considers_force_exit_val > 0 and force_exit_time_obj and isinstance(force_exit_time_obj, datetime.time):
             if current_bar_time >= force_exit_time_obj:
-                if not exit_reason_list: # 他の理由で既に決済が決まっていない場合のみ
+                if not exit_reason_list:
                     exit_reason_list.append(f"強制決済({force_exit_time_obj.strftime('%H:%M')})")
                 exit_now = True
                 
-    exit_price_candidate = None # この関数では決済価格を決定しない (フレームワーク側で決定)
+    exit_price_candidate = None
     final_exit_reason = ", ".join(sorted(list(set(exit_reason_list)))) if exit_reason_list else ""
     
     return exit_now, final_exit_reason, exit_price_candidate
