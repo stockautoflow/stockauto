@@ -1,4 +1,4 @@
-# base.py (リサンプリング方式に変更 + base_interval_str_arg 対応 + ヘルパー関数確認)
+# base.py (リサンプリング方式に変更 + base_interval_str_arg 対応 + ヘルパー関数確認 + 損切り用保有株数連携)
 import pandas as pd
 import numpy as np
 import datetime
@@ -212,11 +212,11 @@ def run_backtest(strategy_module_name, config_filepath,
     except (FileNotFoundError, ValueError) as e_codes:
         logging.error(f"エラー: {e_codes}")
         print(f"エラー (base): {e_codes}", file=sys.stderr)
-        return # ここで終了
+        return 
     except Exception as e_codes_generic:
         logging.error(f"銘柄リスト推測中に予期せぬエラー: {e_codes_generic}", exc_info=True)
         print(f"エラー (base): 銘柄リスト推測中に予期せぬエラーが発生しました。", file=sys.stderr)
-        raise # ここで終了
+        raise 
 
     print(f"--- 全 {NUM_STOCKS_TO_PROCESS} 銘柄のバックテスト処理ループ開始 ---")
     results_summary_list = []
@@ -277,8 +277,9 @@ def run_backtest(strategy_module_name, config_filepath,
                  logging.warning(f"リサンプリング後の環境足データが空です。({effective_context_interval}分)。環境認識なしで続行します。")
                  df_context_ohlc = pd.DataFrame() 
             
-            current_strategy_params['interval_exec'] = exec_interval_min
-            current_strategy_params['interval_context'] = context_interval_min
+            # current_strategy_params はここで更新しない (CLI引数を優先)
+            # loaded_strategy_params には config.yaml からの値が入っている
+            # strategy.py の get_merged_param で適切にマージされる
 
             current_min_date = df_exec_ohlc.index.min() if not df_exec_ohlc.empty else (df_base_data.index.min() if not df_base_data.empty else None)
             current_max_date = df_exec_ohlc.index.max() if not df_exec_ohlc.empty else (df_base_data.index.max() if not df_base_data.empty else None)
@@ -293,8 +294,8 @@ def run_backtest(strategy_module_name, config_filepath,
             df_merged_indicators = strategy_module.calculate_indicators(
                 df_exec_ohlc.copy(),
                 df_context_ohlc.copy(), 
-                current_strategy_params,
-                loaded_strategy_params
+                current_strategy_params, # フレームワークからの動的パラメータ
+                loaded_strategy_params   # config.yamlからロードされた静的パラメータ
             )
             if df_merged_indicators is None or df_merged_indicators.empty:
                 raise ValueError("strategy.calculate_indicators が有効なDataFrameを返しませんでした。")
@@ -317,18 +318,26 @@ def run_backtest(strategy_module_name, config_filepath,
             for i in range(1, len(df_with_signals) -1):
                 current_bar_index = df_with_signals.index[i]
                 current_bar_time = current_bar_index.time()
-                current_bar_data_series = df_with_signals.iloc[i]
+                
+                current_bar_data_series = df_with_signals.iloc[i].copy() # コピーして変更可能にする
+                current_bar_data_series['current_shares_in_pos'] = current_shares # <--- 保有株数を追加
+                
                 prev_bar_data_series = df_with_signals.iloc[i-1]
                 next_bar_open_for_exit = df_with_signals['Open'].iloc[i+1]
                 signal_prev_bar = df_with_signals['Signal'].iloc[i-1] if not pd.isna(df_with_signals['Signal'].iloc[i-1]) else 0
 
+                # 決済条件の判定に渡すパラメータを更新
+                # current_strategy_params_for_exit = current_strategy_params.copy()
+                # current_strategy_params_for_exit['current_shares'] = current_shares # この方法は strategy.py の _get_exit_param の変更が必要
+                                                                                    # current_bar_data_series に含める方がシンプル
+
                 if current_position != 0:
                     exit_now, exit_reason_from_strategy, _ = strategy_module.determine_exit_conditions(
                         current_position,
-                        current_bar_data_series,
+                        current_bar_data_series, # 保有株数情報を含む可能性のあるデータを渡す
                         prev_bar_data_series,
-                        current_strategy_params,
-                        loaded_strategy_params,
+                        current_strategy_params, # FWからの基本パラメータ
+                        loaded_strategy_params,  # configからのパラメータ
                         current_entry_price,
                         current_bar_time
                     )
@@ -354,13 +363,15 @@ def run_backtest(strategy_module_name, config_filepath,
 
                 if current_position == 0 and signal_prev_bar != 0 and is_within_entry_time:
                     entry_price_candidate = entry_bar_open_price * (1 + SLIPPAGE * signal_prev_bar)
-                    risk_width_per_share_example = entry_price_candidate * 0.02
-                    if risk_width_per_share_example <= 0: risk_width_per_share_example = entry_price_candidate * 0.01
+                    risk_width_per_share_example = entry_price_candidate * 0.02 # 仮のリスク幅
+                    if risk_width_per_share_example <= 0: risk_width_per_share_example = entry_price_candidate * 0.01 # フォールバック
+                    
                     target_risk_amount = current_equity * RISK_PER_TRADE
                     shares_to_trade = 0
                     if risk_width_per_share_example > 0:
                         shares_to_trade = int(target_risk_amount / risk_width_per_share_example)
-                        shares_to_trade = (shares_to_trade // 100) * 100
+                        shares_to_trade = (shares_to_trade // 100) * 100 # 単元株に丸める
+                    
                     if shares_to_trade == 0:
                         logging.debug(f"    {current_bar_index}: エントリーシグナル ({'Long' if signal_prev_bar == 1 else 'Short'}) だが株数0で見送り。RiskWidth(仮): {risk_width_per_share_example:.2f}")
                     else:
@@ -368,23 +379,27 @@ def run_backtest(strategy_module_name, config_filepath,
                         commission_entry = trade_cost * COMMISSION_RATE
                         required_capital_for_trade = trade_cost + commission_entry
                         can_trade = True
+                        # 買いの場合のみ資金チェック (売りは信用取引を想定し、ここでは簡略化)
                         if signal_prev_bar == 1 and current_capital < required_capital_for_trade :
                             logging.debug(f"    {current_bar_index}: Longエントリー資金不足。必要:{required_capital_for_trade:,.0f} > 現在:{current_capital:,.0f}"); can_trade = False
+                        
                         if can_trade:
                             current_position = int(signal_prev_bar); current_entry_price = entry_price_candidate
                             current_shares = shares_to_trade; entry_datetime_obj = current_bar_index
-                            current_capital -= commission_entry
+                            current_capital -= commission_entry # 手数料を差し引く
                             logging.info(f"    {entry_datetime_obj}: エントリー {'L' if current_position==1 else 'S'}@P:{current_entry_price:.2f}, Shares:{current_shares}, Cost:{trade_cost:,.0f}, Comm:{commission_entry:,.0f}, Cap(after comm):{current_capital:,.0f}")
+                
                 unrealized_pnl = 0
                 current_bar_close_price = df_with_signals['Close'].iloc[i]
                 if current_position == 1: unrealized_pnl = current_shares * (current_bar_close_price - current_entry_price)
                 elif current_position == -1: unrealized_pnl = current_shares * (current_entry_price - current_bar_close_price)
-                current_equity = current_capital + unrealized_pnl
+                current_equity = current_capital + unrealized_pnl # 時価評価額
                 equity_curve_for_stock.append(current_equity)
 
+            # ループ終了後、まだポジションがあれば強制決済
             if current_position != 0 and len(df_with_signals) > 0 :
                 final_bar_index = df_with_signals.index[-1]
-                final_exit_price = df_with_signals['Open'].iloc[-1]
+                final_exit_price = df_with_signals['Open'].iloc[-1] # 最終足の始値で決済
                 exit_reason_final = "データ終了強制決済(最終足始値)"
                 pnl_per_share_final = (final_exit_price - current_entry_price) if current_position == 1 else (current_entry_price - final_exit_price)
                 gross_pnl_final = current_shares * pnl_per_share_final
@@ -397,9 +412,9 @@ def run_backtest(strategy_module_name, config_filepath,
                     'exit_price': final_exit_price, 'shares': current_shares, 'pnl': net_pnl_final, 'exit_type': exit_reason_final
                 })
                 logging.info(f"    {final_bar_index}: {exit_reason_final} {'L' if current_position==1 else 'S'}@E:{current_entry_price:.2f} X:{final_exit_price:.2f}, PnL:{net_pnl_final:,.0f}, Shares:{current_shares}, Cap:{current_capital:,.0f}")
-                equity_curve_for_stock.append(current_capital)
+                equity_curve_for_stock.append(current_capital) # 最終資産を記録
 
-            final_equity_for_stock = current_capital
+            final_equity_for_stock = current_capital # 最終確定資産
             logging.info(f"  {progress_str}: バックテスト完了。最終確定資産: {final_equity_for_stock:,.0f} 円")
             trade_log_df_for_stock = pd.DataFrame(trade_history_for_stock)
             s_total_trades=0; s_win_rate=0.0; s_total_pnl=0.0; s_pf=0.0; s_avg_win=0.0; s_avg_loss=0.0; s_max_dd=np.nan
