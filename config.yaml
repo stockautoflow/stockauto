@@ -50,26 +50,44 @@ SMA_Settings: # SMA関連の設定
   EXEC_PERIOD_1: 50
   EXEC_PERIOD_2: 200
 
+ICHIMOKU_Settings: # 一目均衡表関連の設定 (実行足用)
+  TENKAN_SEN_PERIOD_EXEC: 9
+  KIJUN_SEN_PERIOD_EXEC: 26
+  SENKOU_SPAN_B_PERIOD_EXEC: 52
+  # CHIKOU_SPAN_SHIFT: -26 # 遅行スパンのシフトは通常基準線期間と同じだが、TA-Libでは直接指定しない
+  # SENKOU_SPAN_SHIFT: 26  # 先行スパンのシフトは通常基準線期間と同じだが、TA-Libでは直接指定しない
+
 Activation_Flags: # 各種ロジックの有効化フラグ
   # 環境認識フェーズ (0:無効, 1:OR条件, 2:AND条件)
-  CONTEXT_TREND_DIR_EMA_CROSS_ACTIVE: 0
+  CONTEXT_TREND_DIR_EMA_CROSS_ACTIVE: 2
   CONTEXT_TREND_STR_ADX_ACTIVE: 2
-  CONTEXT_PRICE_VWAP_RELATION_ACTIVE: 0 # <--- VWAP戦略のフラグを追加 (0:無効, 1:OR条件, 2:AND条件)
   CONTEXT_TREND_DIR_DMI_ACTIVE: 2 # <--- DMI(DI+/DI-)戦略のフラグを追加
+  CONTEXT_PRICE_VWAP_RELATION_ACTIVE: 2 # <--- VWAP戦略のフラグを追加 (0:無効, 1:OR条件, 2:AND条件)
 
   # エントリーフェーズ (0:無効, 1:OR条件, 2:AND条件)
   ENTRY_STOCH_ACTIVE: 0
   ENTRY_MACD_ACTIVE: 2
-  ENTRY_BB_MIDDLE_ACTIVE: 2
+  ENTRY_BB_MIDDLE_ACTIVE: 0
   ENTRY_MACD_HIST_EMA_ACTIVE: 0      # MACDヒストグラムEMAでのエントリー (0:無効, 1:OR条件, 2:AND条件) <--- 追加
+  # --- 一目均衡表 ---
+  # マスターフラグ (0:無効, 1:OR条件で他戦略と結合, 2:AND条件で他戦略と結合)
+  ENTRY_ICHIMOKU_ACTIVE: 2
+  # --- 一目均衡表の個別エントリー条件 ---
+  # 上記マスターフラグが有効な場合に評価される。
+  # 有効(1)にした条件はすべてANDで結合される。
+  # (0: 無効, 1: 有効)
+  ENTRY_ICHIMOKU_TENKAN_KIJUN_CROSS_ACTIVE: 1
+  ENTRY_ICHIMOKU_KUMO_BREAKOUT_ACTIVE: 1
+  ENTRY_ICHIMOKU_CHIKOU_CROSS_ACTIVE: 1
 
   # 決済ロジック (0:無効, 1:有効)
   # 損切 (Stop Loss)
   STOP_LOSS_STOCH_REVERSE_ACTIVE: 1
   STOP_LOSS_MACD_REVERSE_ACTIVE: 1
   STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE: 1
-  STOP_LOSS_ATR_MULTIPLE: 1.0 #1.5 #2.0       # ATR SLの倍率 (0以下またはコメントアウトで無効)
+  STOP_LOSS_ATR_MULTIPLE: 0.01 #1.0 #1.5 #2.0       # ATR SLの倍率 (0以下またはコメントアウトで無効)
   STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE: 1 # MACDヒストグラムEMAのクロス/傾き反転での損切り <--- 追加
+#  STOP_LOSS_FIXED_AMOUNT_ACTIVE: 1  # <--- 固定損失額による損切りフラグ (0:無効, 1:有効)
 
   # 利確 (Take Profit)
   TAKE_PROFIT_STOCH_EXTREME_REVERSE_ACTIVE: 0
@@ -84,3 +102,7 @@ Trading_Hours: # 取引時間
   ENTRY_START_TIME_STR: '09:00:00'
   ENTRY_END_TIME_STR: '14:55:00'
   FORCE_EXIT_TIME_STR: '15:00:00'
+
+#Fixed_Loss_Cut_Settings: # 固定損失額による損切り設定
+#  MAX_LOSS_PER_TRADE_YEN: 50000  # 1トレードあたりの最大許容損失額 (円単位)
+

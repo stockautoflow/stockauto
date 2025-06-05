@@ -1,4 +1,4 @@
-# strategy.py (修正版 - DMI環境認識戦略追加)
+# strategy.py (修正版 - 一目均衡表の個別条件設定に対応)
 
 import pandas as pd
 import numpy as np
@@ -14,6 +14,9 @@ except ImportError:
     YAML_AVAILABLE = False
 else:
     YAML_AVAILABLE = True
+
+# technical_indicators.py から一目均衡表の計算関数をインポート
+from technical_indicators import calculate_ichimoku_components
 
 def flatten_dict(d, parent_key='', sep='_'):
     """ネストした辞書をフラットな辞書に変換する。キーは親キーと結合され、大文字になる。"""
@@ -196,6 +199,11 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
     atr_exec_p_chart = _get_param('ATR_SETTINGS_PERIOD_EXEC', is_period=True)
     sma1_p_exec = _get_param('SMA_SETTINGS_EXEC_PERIOD_1', is_period=True); sma2_p_exec = _get_param('SMA_SETTINGS_EXEC_PERIOD_2', is_period=True)
     ema_s_p_exec_chart = _get_param('EMA_SETTINGS_SHORT_EXEC_CHART', is_period=True); ema_l_p_exec_chart = _get_param('EMA_SETTINGS_LONG_EXEC_CHART', is_period=True)
+    # 一目均衡表のパラメータ取得 (実行足用)
+    tenkan_p_exec = _get_param('ICHIMOKU_SETTINGS_TENKAN_SEN_PERIOD_EXEC', is_period=True)
+    kijun_p_exec = _get_param('ICHIMOKU_SETTINGS_KIJUN_SEN_PERIOD_EXEC', is_period=True)
+    senkou_b_p_exec = _get_param('ICHIMOKU_SETTINGS_SENKOU_SPAN_B_PERIOD_EXEC', is_period=True)
+
 
     if not df_e.empty:
         with warnings.catch_warnings():
@@ -217,6 +225,32 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
                 df_e[f'MACDhist_EMA_exec'] = talib.EMA(df_e['MACDhist_exec'], timeperiod=macd_hist_ema_period_exec)
             else:
                 df_e[f'MACDhist_EMA_exec'] = np.nan
+            
+            # 一目均衡表の計算 (実行足)
+            if all(p is not None for p in [tenkan_p_exec, kijun_p_exec, senkou_b_p_exec]) and \
+               len(df_e['Close']) >= max(tenkan_p_exec, kijun_p_exec, senkou_b_p_exec):
+                ichimoku_df = calculate_ichimoku_components(
+                    df_e, 
+                    tenkan_period=tenkan_p_exec, 
+                    kijun_period=kijun_p_exec, 
+                    senkou_b_period=senkou_b_p_exec
+                )
+                df_e['tenkan_sen_exec'] = ichimoku_df['tenkan_sen']
+                df_e['kijun_sen_exec'] = ichimoku_df['kijun_sen']
+                df_e['senkou_span_a_exec'] = ichimoku_df['senkou_span_a']
+                df_e['senkou_span_b_exec'] = ichimoku_df['senkou_span_b']
+                df_e['chikou_span_exec'] = ichimoku_df['chikou_span']
+                df_e['senkou_span_a_raw_exec'] = ichimoku_df['senkou_span_a_raw']
+                df_e['senkou_span_b_raw_exec'] = ichimoku_df['senkou_span_b_raw']
+            else:
+                df_e['tenkan_sen_exec'] = np.nan
+                df_e['kijun_sen_exec'] = np.nan
+                df_e['senkou_span_a_exec'] = np.nan
+                df_e['senkou_span_b_exec'] = np.nan
+                df_e['chikou_span_exec'] = np.nan
+                df_e['senkou_span_a_raw_exec'] = np.nan
+                df_e['senkou_span_b_raw_exec'] = np.nan
+
             if bb_period_e and len(df_e['Close']) >= bb_period_e:
                 df_e['BB_Middle_exec'] = talib.SMA(df_e['Close'], timeperiod=bb_period_e)
                 std_dev_exec = talib.STDDEV(df_e['Close'], timeperiod=bb_period_e, nbdev=1)
@@ -235,7 +269,10 @@ def calculate_indicators(df_exec, df_context, params_from_backtester, loaded_str
         for p, col_base, suffix in [(ema_s_p_exec_chart,"EMA","_exec"), (ema_l_p_exec_chart,"EMA","_exec"), (sma1_p_exec,"SMA","_exec"), (sma2_p_exec,"SMA","_exec")]:
             df_e[f'{col_base}{p if p else ""}{suffix}'] = np.nan
         for col_nan_e in ['STOCH_K_exec', 'STOCH_D_exec', 'MACD_exec', 'MACDsignal_exec', 'MACDhist_exec', 
-                          f'MACDhist_EMA_exec', 'BB_Middle_exec', 'BB_Upper_exec', 'BB_Lower_exec', 
+                          f'MACDhist_EMA_exec', 
+                          'tenkan_sen_exec', 'kijun_sen_exec', 'senkou_span_a_exec', 'senkou_span_b_exec', 'chikou_span_exec',
+                          'senkou_span_a_raw_exec', 'senkou_span_b_raw_exec',
+                          'BB_Middle_exec', 'BB_Upper_exec', 'BB_Lower_exec', 
                           f'ATR_{atr_exec_p_chart if atr_exec_p_chart else ""}_EXEC_Chart', 'VWAP_daily_exec']:
             df_e[col_nan_e] = np.nan
         for i in range(1,4): df_e[f'BB_Upper_exec_{i}dev']=np.nan; df_e[f'BB_Lower_exec_{i}dev']=np.nan
@@ -314,6 +351,14 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
     use_macd_entry = _get_param('ACTIVATION_FLAGS_ENTRY_MACD_ACTIVE', is_activation_flag=True)
     use_bb_middle_entry = _get_param('ACTIVATION_FLAGS_ENTRY_BB_MIDDLE_ACTIVE', is_activation_flag=True)
     use_macd_hist_ema_entry = _get_param('ACTIVATION_FLAGS_ENTRY_MACD_HIST_EMA_ACTIVE', is_activation_flag=True)
+    
+    # 一目均衡表の個別条件フラグ
+    use_ichimoku_entry = _get_param('ACTIVATION_FLAGS_ENTRY_ICHIMOKU_ACTIVE', is_activation_flag=True)
+    use_tenkan_kijun_cross = _get_param('ACTIVATION_FLAGS_ENTRY_ICHIMOKU_TENKAN_KIJUN_CROSS_ACTIVE', is_activation_flag=True)
+    use_kumo_breakout = _get_param('ACTIVATION_FLAGS_ENTRY_ICHIMOKU_KUMO_BREAKOUT_ACTIVE', is_activation_flag=True)
+    use_chikou_cross = _get_param('ACTIVATION_FLAGS_ENTRY_ICHIMOKU_CHIKOU_CROSS_ACTIVE', is_activation_flag=True)
+    kijun_p_exec_for_chikou_shift = _get_param('ICHIMOKU_SETTINGS_KIJUN_SEN_PERIOD_EXEC', is_period=True)
+
 
     # カラム名定義
     ema_short_col_its = f'EMA{ema_short_p_ctx}_ctx_ITS' if ema_short_p_ctx else None
@@ -328,7 +373,13 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
     macd_line_col = 'MACD_exec'; macd_signal_col = 'MACDsignal_exec'
     macd_hist_col = 'MACDhist_exec'
     macd_hist_ema_col = 'MACDhist_EMA_exec'
-    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close'
+    bb_middle_col = 'BB_Middle_exec'; close_col = 'Close' # 実行足Close
+
+    tenkan_sen_col = 'tenkan_sen_exec'
+    kijun_sen_col = 'kijun_sen_exec'
+    current_senkou_span_a_col = 'senkou_span_a_raw_exec'
+    current_senkou_span_b_col = 'senkou_span_b_raw_exec'
+    chikou_span_col = 'chikou_span_exec'
 
     required_cols_check_map = {
         "EMA_CTX_SHORT_ITS": (ema_short_col_its, use_ema_cross_ctx > 0), 
@@ -343,9 +394,14 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         "MACD_EXEC": (macd_line_col, use_macd_entry > 0),
         "MACD_SIGNAL_EXEC": (macd_signal_col, use_macd_entry > 0), 
         "BB_MIDDLE_EXEC": (bb_middle_col, use_bb_middle_entry > 0),
-        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0),
+        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0 or use_ichimoku_entry > 0),
         "MACD_HIST_EXEC": (macd_hist_col, use_macd_hist_ema_entry > 0),
-        "MACD_HIST_EMA_EXEC": (macd_hist_ema_col, use_macd_hist_ema_entry > 0)
+        "MACD_HIST_EMA_EXEC": (macd_hist_ema_col, use_macd_hist_ema_entry > 0),
+        "TENKAN_SEN_EXEC": (tenkan_sen_col, use_ichimoku_entry > 0 and use_tenkan_kijun_cross > 0),
+        "KIJUN_SEN_EXEC": (kijun_sen_col, use_ichimoku_entry > 0 and use_tenkan_kijun_cross > 0),
+        "CURRENT_SENKOU_A_EXEC": (current_senkou_span_a_col, use_ichimoku_entry > 0 and use_kumo_breakout > 0),
+        "CURRENT_SENKOU_B_EXEC": (current_senkou_span_b_col, use_ichimoku_entry > 0 and use_kumo_breakout > 0),
+        "CHIKOU_SPAN_EXEC": (chikou_span_col, use_ichimoku_entry > 0 and use_chikou_cross > 0),
     }
     missing_or_all_nan_cols = []
     for display_name, (col_name, is_rule_active) in required_cols_check_map.items():
@@ -454,10 +510,10 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         elif use_macd_entry == 1: entry_optional_long_cond_list.append(macd_buy_trigger); entry_optional_short_cond_list.append(macd_sell_trigger)
 
     if use_bb_middle_entry > 0 and bb_middle_col in df.columns and close_col in df.columns:
-        close = df[close_col].ffill().bfill(); bb_mid = df[bb_middle_col].ffill().bfill()
-        valid_bb_mid_data = close.notna() & bb_mid.notna()
+        close_val = df[close_col].ffill().bfill(); bb_mid = df[bb_middle_col].ffill().bfill()
+        valid_bb_mid_data = close_val.notna() & bb_mid.notna()
         bb_buy_trigger = pd.Series(False, index=df.index); bb_sell_trigger = pd.Series(False, index=df.index)
-        if valid_bb_mid_data.any(): bb_buy_trigger[valid_bb_mid_data] = close[valid_bb_mid_data] <= bb_mid[valid_bb_mid_data]; bb_sell_trigger[valid_bb_mid_data] = close[valid_bb_mid_data] >= bb_mid[valid_bb_mid_data]
+        if valid_bb_mid_data.any(): bb_buy_trigger[valid_bb_mid_data] = close_val[valid_bb_mid_data] <= bb_mid[valid_bb_mid_data]; bb_sell_trigger[valid_bb_mid_data] = close_val[valid_bb_mid_data] >= bb_mid[valid_bb_mid_data]
         if use_bb_middle_entry == 2: entry_mandatory_long_cond &= bb_buy_trigger; entry_mandatory_short_cond &= bb_sell_trigger
         elif use_bb_middle_entry == 1: entry_optional_long_cond_list.append(bb_buy_trigger); entry_optional_short_cond_list.append(bb_sell_trigger)
 
@@ -474,6 +530,45 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         elif use_macd_hist_ema_entry == 1:
             entry_optional_long_cond_list.append(hist_ema_buy_trigger)
             entry_optional_short_cond_list.append(hist_ema_sell_trigger)
+
+    if use_ichimoku_entry > 0:
+        ichimoku_buy_cond_agg = pd.Series(True, index=df.index)
+        ichimoku_sell_cond_agg = pd.Series(True, index=df.index)
+
+        if use_tenkan_kijun_cross > 0 and all(c in df.columns for c in [tenkan_sen_col, kijun_sen_col]):
+            tenkan = df[tenkan_sen_col].ffill().bfill()
+            kijun = df[kijun_sen_col].ffill().bfill()
+            tenkan_cross_kijun_buy = (tenkan.shift(1) <= kijun.shift(1)) & (tenkan > kijun)
+            tenkan_cross_kijun_sell = (tenkan.shift(1) >= kijun.shift(1)) & (tenkan < kijun)
+            ichimoku_buy_cond_agg &= tenkan_cross_kijun_buy
+            ichimoku_sell_cond_agg &= tenkan_cross_kijun_sell
+
+        if use_kumo_breakout > 0 and all(c in df.columns for c in [current_senkou_span_a_col, current_senkou_span_b_col, close_col]):
+            ichimoku_close = df[close_col].ffill().bfill()
+            current_span_a = df[current_senkou_span_a_col].ffill().bfill()
+            current_span_b = df[current_senkou_span_b_col].ffill().bfill()
+            current_kumo_upper = pd.Series(np.where(current_span_a > current_span_b, current_span_a, current_span_b), index=df.index)
+            current_kumo_lower = pd.Series(np.where(current_span_a < current_span_b, current_span_a, current_span_b), index=df.index)
+            price_above_current_kumo = ichimoku_close > current_kumo_upper
+            price_below_current_kumo = ichimoku_close < current_kumo_lower
+            ichimoku_buy_cond_agg &= price_above_current_kumo
+            ichimoku_sell_cond_agg &= price_below_current_kumo
+
+        if use_chikou_cross > 0 and close_col in df.columns and kijun_p_exec_for_chikou_shift is not None:
+            close_price_for_chikou_comparison = df[close_col].shift(kijun_p_exec_for_chikou_shift)
+            chikou_break_up = (df[close_col].shift(1) <= close_price_for_chikou_comparison.shift(1)) & \
+                              (df[close_col] > close_price_for_chikou_comparison)
+            chikou_break_down = (df[close_col].shift(1) >= close_price_for_chikou_comparison.shift(1)) & \
+                                (df[close_col] < close_price_for_chikou_comparison)
+            ichimoku_buy_cond_agg &= chikou_break_up
+            ichimoku_sell_cond_agg &= chikou_break_down
+
+        if use_ichimoku_entry == 2:
+            entry_mandatory_long_cond &= ichimoku_buy_cond_agg
+            entry_mandatory_short_cond &= ichimoku_sell_cond_agg
+        elif use_ichimoku_entry == 1:
+            entry_optional_long_cond_list.append(ichimoku_buy_cond_agg)
+            entry_optional_short_cond_list.append(ichimoku_sell_cond_agg)
 
     final_entry_optional_long_cond = pd.Series(True, index=df.index)
     if entry_optional_long_cond_list:

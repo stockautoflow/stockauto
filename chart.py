@@ -539,6 +539,42 @@ def plot_chart_for_stock(
                         ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[f'BB_Upper_exec_{i}dev'], c='gray', ls=ls_map[i], lw=0.7, alpha=alpha_map[i], label=f'+{i}σ_exec')
                     if f'BB_Lower_exec_{i}dev' in df_with_signals_plot.columns and df_with_signals_plot[f'BB_Lower_exec_{i}dev'].notna().any():
                         ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[f'BB_Lower_exec_{i}dev'], c='gray', ls=ls_map[i], lw=0.7, alpha=alpha_map[i], label=f'-{i}σ_exec')
+
+            # 一目均衡表の描画 (実行足)
+            tenkan_col_exec = 'tenkan_sen_exec'
+            kijun_col_exec = 'kijun_sen_exec'
+            span_a_col_exec = 'senkou_span_a_exec' # 未来の雲
+            span_b_col_exec = 'senkou_span_b_exec' # 未来の雲
+            current_span_a_col_exec = 'senkou_span_a_raw_exec' # 現在の雲
+            current_span_b_col_exec = 'senkou_span_b_raw_exec' # 現在の雲
+            chikou_col_exec = 'chikou_span_exec'
+
+            if tenkan_col_exec in df_with_signals_plot.columns and df_with_signals_plot[tenkan_col_exec].notna().any():
+                ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[tenkan_col_exec], label='Tenkan', color='saddlebrown', lw=0.7, ls='-')
+            if kijun_col_exec in df_with_signals_plot.columns and df_with_signals_plot[kijun_col_exec].notna().any():
+                ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[kijun_col_exec], label='Kijun', color='blueviolet', lw=0.7, ls='-')
+            
+            if span_a_col_exec in df_with_signals_plot.columns and df_with_signals_plot[span_a_col_exec].notna().any() and \
+               span_b_col_exec in df_with_signals_plot.columns and df_with_signals_plot[span_b_col_exec].notna().any():
+                ax4.fill_between(df_with_signals_plot['x_index'], 
+                                 df_with_signals_plot[span_a_col_exec], 
+                                 df_with_signals_plot[span_b_col_exec], 
+                                 where=df_with_signals_plot[span_a_col_exec] >= df_with_signals_plot[span_b_col_exec], 
+                                 color='lightcoral', alpha=0.2, label='Future Kumo (Up)')
+                ax4.fill_between(df_with_signals_plot['x_index'], 
+                                 df_with_signals_plot[span_a_col_exec], 
+                                 df_with_signals_plot[span_b_col_exec], 
+                                 where=df_with_signals_plot[span_a_col_exec] < df_with_signals_plot[span_b_col_exec], 
+                                 color='lightgreen', alpha=0.2, label='Future Kumo (Down)') # 雲の色を緑系に変更
+
+            if current_span_a_col_exec in df_with_signals_plot.columns and df_with_signals_plot[current_span_a_col_exec].notna().any():
+                 ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[current_span_a_col_exec], label='Current SpanA', color='gray', lw=0.5, ls='--')
+            if current_span_b_col_exec in df_with_signals_plot.columns and df_with_signals_plot[current_span_b_col_exec].notna().any():
+                 ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[current_span_b_col_exec], label='Current SpanB', color='darkgray', lw=0.5, ls='--')
+
+            if chikou_col_exec in df_with_signals_plot.columns and df_with_signals_plot[chikou_col_exec].notna().any():
+                ax4.plot(df_with_signals_plot['x_index'], df_with_signals_plot[chikou_col_exec], label='Chikou', color='olivedrab', lw=0.7, ls=':')
+
         plot_markers_gapless(ax4, df_exec_plot, buy_entries_for_plot, marker_buy_entry, {'datetime_col': 'entry_date', 'price_col': 'entry_price'})
         plot_markers_gapless(ax4, df_exec_plot, sell_entries_for_plot, marker_sell_entry, {'datetime_col': 'entry_date', 'price_col': 'entry_price'})
         plot_markers_gapless(ax4, df_exec_plot, take_profits_for_plot, marker_tp, {'datetime_col': 'exit_date', 'price_col': 'exit_price'})
