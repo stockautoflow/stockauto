@@ -37,11 +37,11 @@ convert_excel_to_csv_on_startup: true
 
 # 監視対象のExcelファイルパスのリスト
 excel_files_to_watch:
-  - "data/GetStockDataTest1-50.xlsm"
-  - "data/GetStockDataTest51-100.xlsm" # 例: 別のExcelファイルを追加する場合
-  - "data/GetStockDataTest101-150.xlsm" # 必要に応じてさらにファイルパスを追加
-  - "data/GetStockDataTest151-200.xlsm" # 必要に応じてさらにファイルパスを追加
-  - "data/GetStockDataTest201-225.xlsm" # 必要に応じてさらにファイルパスを追加
+  - "data/GetStockDataTest_5M_1-50.xlsm"
+  - "data/GetStockDataTest_5M_51-100.xlsm" # 例: 別のExcelファイルを追加する場合
+  - "data/GetStockDataTest_5M_101-150.xlsm" # 必要に応じてさらにファイルパスを追加
+  - "data/GetStockDataTest_5M_151-200.xlsm" # 必要に応じてさらにファイルパスを追加
+  - "data/GetStockDataTest_5M_201-225.xlsm" # 必要に応じてさらにファイルパスを追加
 
 csv_output_directory_for_converter: "data/realtime_ohlc" # converter.pyのCSV出力先
 
