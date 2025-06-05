@@ -82,12 +82,12 @@ Activation_Flags: # 各種ロジックの有効化フラグ
 
   # 決済ロジック (0:無効, 1:有効)
   # 損切 (Stop Loss)
-  STOP_LOSS_STOCH_REVERSE_ACTIVE: 1
-  STOP_LOSS_MACD_REVERSE_ACTIVE: 1
-  STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE: 1
-  STOP_LOSS_ATR_MULTIPLE: 0.01 #1.0 #1.5 #2.0       # ATR SLの倍率 (0以下またはコメントアウトで無効)
-  STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE: 1 # MACDヒストグラムEMAのクロス/傾き反転での損切り <--- 追加
-#  STOP_LOSS_FIXED_AMOUNT_ACTIVE: 1  # <--- 固定損失額による損切りフラグ (0:無効, 1:有効)
+  STOP_LOSS_STOCH_REVERSE_ACTIVE: 0
+  STOP_LOSS_MACD_REVERSE_ACTIVE: 0
+  STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE: 0
+  STOP_LOSS_ATR_MULTIPLE: 0 #0.01 #1.0 #1.5 #2.0       # ATR SLの倍率 (0以下またはコメントアウトで無効)
+  STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE: 0 # MACDヒストグラムEMAのクロス/傾き反転での損切り <--- 追加
+  STOP_LOSS_FIXED_AMOUNT_ACTIVE: 1  # <--- 固定損失額による損切りフラグ (0:無効, 1:有効)
 
   # 利確 (Take Profit)
   TAKE_PROFIT_STOCH_EXTREME_REVERSE_ACTIVE: 0
@@ -103,6 +103,6 @@ Trading_Hours: # 取引時間
   ENTRY_END_TIME_STR: '14:55:00'
   FORCE_EXIT_TIME_STR: '15:00:00'
 
-#Fixed_Loss_Cut_Settings: # 固定損失額による損切り設定
-#  MAX_LOSS_PER_TRADE_YEN: 50000  # 1トレードあたりの最大許容損失額 (円単位)
+Fixed_Loss_Cut_Settings: # 固定損失額による損切り設定
+  MAX_LOSS_PER_TRADE_YEN: 100  # 1トレードあたりの最大許容損失額 (円単位)
 
