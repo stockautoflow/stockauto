@@ -60,6 +60,9 @@ ICHIMOKU_Settings: # 一目均衡表関連の設定 (実行足用)
 Fixed_Loss_Cut_Settings: # 固定損失額による損切り設定
   MAX_LOSS_PER_TRADE_YEN: 1500 #15000  # 1トレードあたりの最大許容損失額 (円単位)
 
+Filter_Settings:
+  MAX_PRICE_CHANGE_RATE: 0.001 # 0.001 = 0.1% # 直前の足の始値からの価格変動率がこの値以下の場合のみエントリーを許可
+
 Activation_Flags: # 各種ロジックの有効化フラグ
   # 環境認識フェーズ (0:無効, 1:OR条件, 2:AND条件)
   CONTEXT_TREND_DIR_EMA_CROSS_ACTIVE: 0
@@ -72,6 +75,7 @@ Activation_Flags: # 各種ロジックの有効化フラグ
   ENTRY_MACD_ACTIVE: 2
   ENTRY_BB_MIDDLE_ACTIVE: 0
   ENTRY_MACD_HIST_EMA_ACTIVE: 0      # MACDヒストグラムEMAでのエントリー (0:無効, 1:OR条件, 2:AND条件) <--- 追加
+  ENTRY_PRICE_CHANGE_FILTER_ACTIVE: 1 # (0: 無効, 1: 有効)
   # --- 一目均衡表 ---
   # マスターフラグ (0:無効, 1:OR条件で他戦略と結合, 2:AND条件で他戦略と結合)
   ENTRY_ICHIMOKU_ACTIVE: 2
@@ -90,13 +94,13 @@ Activation_Flags: # 各種ロジックの有効化フラグ
   STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE: 0
   STOP_LOSS_ATR_MULTIPLE: 0 #0.01 #1.0 #1.5 #2.0       # ATR SLの倍率 (0以下またはコメントアウトで無効)
   STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE: 0 # MACDヒストグラムEMAのクロス/傾き反転での損切り <--- 追加
-  STOP_LOSS_FIXED_AMOUNT_ACTIVE: 1  # <--- 固定損失額による損切りフラグ (0:無効, 1:有効)
+  STOP_LOSS_FIXED_AMOUNT_ACTIVE: 0 #1  # <--- 固定損失額による損切りフラグ (0:無効, 1:有効)
 
   # 利確 (Take Profit)
   TAKE_PROFIT_STOCH_EXTREME_REVERSE_ACTIVE: 0
-  TAKE_PROFIT_MACD_HIST_REVERSE_ACTIVE: 1
-  TAKE_PROFIT_BB_EXTREME_TOUCH_ACTIVE: 1
-  TAKE_PROFIT_MACD_HIST_EMA_REVERSE_ACTIVE: 1 # MACDヒストグラムEMAの傾き反転での利確 <--- 追加
+  TAKE_PROFIT_MACD_HIST_REVERSE_ACTIVE: 0
+  TAKE_PROFIT_BB_EXTREME_TOUCH_ACTIVE: 0
+  TAKE_PROFIT_MACD_HIST_EMA_REVERSE_ACTIVE: 0 # MACDヒストグラムEMAの傾き反転での利確 <--- 追加
 
   # 強制決済
   STRATEGY_CONSIDERS_FORCE_EXIT_TIME: 1 # 1: 戦略がFWの強制決済時刻を考慮する
@@ -104,4 +108,3 @@ Trading_Hours: # 取引時間
   ENTRY_START_TIME_STR: '09:30:00'
   ENTRY_END_TIME_STR: '14:30:00'
   FORCE_EXIT_TIME_STR: '15:00:00'
-
