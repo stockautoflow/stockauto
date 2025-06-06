@@ -103,7 +103,7 @@ Activation_Flags: # 各種ロジックの有効化フラグ
   TAKE_PROFIT_MACD_HIST_EMA_REVERSE_ACTIVE: 0 # MACDヒストグラムEMAの傾き反転での利確 <--- 追加
 
   # 強制決済
-  STRATEGY_CONSIDERS_FORCE_EXIT_TIME: 1 # 1: 戦略がFWの強制決済時刻を考慮する
+  STRATEGY_CONSIDERS_FORCE_EXIT_TIME: 0 # 1: 戦略がFWの強制決済時刻を考慮する
 Trading_Hours: # 取引時間
   ENTRY_START_TIME_STR: '09:30:00'
   ENTRY_END_TIME_STR: '14:30:00'
