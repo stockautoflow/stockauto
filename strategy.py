@@ -1,4 +1,4 @@
-# strategy.py (修正版 - 一目均衡表の個別条件設定に対応)
+# strategy.py (修正版 - 固定損失額損切り追加)
 
 import pandas as pd
 import numpy as np
@@ -60,7 +60,7 @@ def load_strategy_config_yaml(filename="config.yaml"):
     return flatten_dict(config_params_nested)
 
 def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded,
-                     is_period=False, is_float=False, is_activation_flag=False, is_bool=False):
+                     is_period=False, is_float=False, is_activation_flag=False, is_bool=False, is_int=False): # is_int追加
     key_upper = key.upper()
     val_from_config = strategy_primary_params_loaded.get(key_upper)
     val_from_fw = params_from_backtester.get(key)
@@ -77,6 +77,7 @@ def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded
         if is_bool: return False
         if is_period: return 20
         if is_float: return 0.0
+        if is_int: return 0
         return None
 
     try:
@@ -87,6 +88,7 @@ def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded
             return bool(int(float(val)))
         if is_period: return int(float(val))
         if is_float: return float(val)
+        if is_int: return int(float(val)) # is_int の処理
         return val
     except (ValueError, TypeError) as e:
         print(f"[Strategy Param Warning] Conversion error for '{key_upper}', value '{val}': {e}. Using fallback.")
@@ -94,6 +96,7 @@ def get_merged_param(key, params_from_backtester, strategy_primary_params_loaded
         if is_bool: return False
         if is_period: return 20
         if is_float: return 0.0
+        if is_int: return 0
         return None
 
 def calculate_vwap(df, period='D'):
@@ -394,15 +397,19 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
         "MACD_EXEC": (macd_line_col, use_macd_entry > 0),
         "MACD_SIGNAL_EXEC": (macd_signal_col, use_macd_entry > 0), 
         "BB_MIDDLE_EXEC": (bb_middle_col, use_bb_middle_entry > 0),
-        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0 or use_ichimoku_entry > 0),
+        "CLOSE_EXEC": (close_col, use_bb_middle_entry > 0 or (use_ichimoku_entry > 0 and (use_kumo_breakout > 0 or use_chikou_cross > 0))),
         "MACD_HIST_EXEC": (macd_hist_col, use_macd_hist_ema_entry > 0),
         "MACD_HIST_EMA_EXEC": (macd_hist_ema_col, use_macd_hist_ema_entry > 0),
         "TENKAN_SEN_EXEC": (tenkan_sen_col, use_ichimoku_entry > 0 and use_tenkan_kijun_cross > 0),
         "KIJUN_SEN_EXEC": (kijun_sen_col, use_ichimoku_entry > 0 and use_tenkan_kijun_cross > 0),
         "CURRENT_SENKOU_A_EXEC": (current_senkou_span_a_col, use_ichimoku_entry > 0 and use_kumo_breakout > 0),
         "CURRENT_SENKOU_B_EXEC": (current_senkou_span_b_col, use_ichimoku_entry > 0 and use_kumo_breakout > 0),
-        "CHIKOU_SPAN_EXEC": (chikou_span_col, use_ichimoku_entry > 0 and use_chikou_cross > 0),
+        # CHIKOU_SPAN_EXEC is derived from Close, so its direct check might be redundant if Close is checked for chikou cross
     }
+    if use_ichimoku_entry > 0 and use_chikou_cross > 0 : # CHIKOU_SPAN_EXEC is only needed if this specific condition is active
+        required_cols_check_map["CHIKOU_SPAN_EXEC"] = (chikou_span_col, True)
+
+
     missing_or_all_nan_cols = []
     for display_name, (col_name, is_rule_active) in required_cols_check_map.items():
         if is_rule_active:
@@ -532,17 +539,26 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
             entry_optional_short_cond_list.append(hist_ema_sell_trigger)
 
     if use_ichimoku_entry > 0:
-        ichimoku_buy_cond_agg = pd.Series(True, index=df.index)
-        ichimoku_sell_cond_agg = pd.Series(True, index=df.index)
+        # Initialize individual Ichimoku conditions to True (if not used, they don't restrict)
+        # or False (if they must be explicitly met - better for AND logic if master flag is on)
+        # Let's make them True by default and AND them if their specific flag is active.
+        ichimoku_component_buy_conditions = []
+        ichimoku_component_sell_conditions = []
 
+        # 1. Tenkan-Kijun Cross
         if use_tenkan_kijun_cross > 0 and all(c in df.columns for c in [tenkan_sen_col, kijun_sen_col]):
             tenkan = df[tenkan_sen_col].ffill().bfill()
             kijun = df[kijun_sen_col].ffill().bfill()
-            tenkan_cross_kijun_buy = (tenkan.shift(1) <= kijun.shift(1)) & (tenkan > kijun)
-            tenkan_cross_kijun_sell = (tenkan.shift(1) >= kijun.shift(1)) & (tenkan < kijun)
-            ichimoku_buy_cond_agg &= tenkan_cross_kijun_buy
-            ichimoku_sell_cond_agg &= tenkan_cross_kijun_sell
+            tenkan_cross_kijun_buy = (tenkan.shift(1).fillna(method='bfill') <= kijun.shift(1).fillna(method='bfill')) & (tenkan > kijun)
+            tenkan_cross_kijun_sell = (tenkan.shift(1).fillna(method='bfill') >= kijun.shift(1).fillna(method='bfill')) & (tenkan < kijun)
+            ichimoku_component_buy_conditions.append(tenkan_cross_kijun_buy)
+            ichimoku_component_sell_conditions.append(tenkan_cross_kijun_sell)
+        elif use_tenkan_kijun_cross > 0: # Flag is on, but columns missing (should have been caught by check_map)
+            ichimoku_component_buy_conditions.append(pd.Series(False, index=df.index)) # Fail safe
+            ichimoku_component_sell_conditions.append(pd.Series(False, index=df.index))
 
+
+        # 2. Kumo Breakout (Price vs Current Kumo)
         if use_kumo_breakout > 0 and all(c in df.columns for c in [current_senkou_span_a_col, current_senkou_span_b_col, close_col]):
             ichimoku_close = df[close_col].ffill().bfill()
             current_span_a = df[current_senkou_span_a_col].ffill().bfill()
@@ -551,24 +567,49 @@ def generate_signals(df, params_from_backtester, loaded_strategy_params):
             current_kumo_lower = pd.Series(np.where(current_span_a < current_span_b, current_span_a, current_span_b), index=df.index)
             price_above_current_kumo = ichimoku_close > current_kumo_upper
             price_below_current_kumo = ichimoku_close < current_kumo_lower
-            ichimoku_buy_cond_agg &= price_above_current_kumo
-            ichimoku_sell_cond_agg &= price_below_current_kumo
+            ichimoku_component_buy_conditions.append(price_above_current_kumo)
+            ichimoku_component_sell_conditions.append(price_below_current_kumo)
+        elif use_kumo_breakout > 0:
+            ichimoku_component_buy_conditions.append(pd.Series(False, index=df.index))
+            ichimoku_component_sell_conditions.append(pd.Series(False, index=df.index))
 
+        # 3. Chikou Span Cross
         if use_chikou_cross > 0 and close_col in df.columns and kijun_p_exec_for_chikou_shift is not None:
             close_price_for_chikou_comparison = df[close_col].shift(kijun_p_exec_for_chikou_shift)
-            chikou_break_up = (df[close_col].shift(1) <= close_price_for_chikou_comparison.shift(1)) & \
+            chikou_break_up = (df[close_col].shift(1).fillna(method='bfill') <= close_price_for_chikou_comparison.shift(1).fillna(method='bfill')) & \
                               (df[close_col] > close_price_for_chikou_comparison)
-            chikou_break_down = (df[close_col].shift(1) >= close_price_for_chikou_comparison.shift(1)) & \
+            chikou_break_down = (df[close_col].shift(1).fillna(method='bfill') >= close_price_for_chikou_comparison.shift(1).fillna(method='bfill')) & \
                                 (df[close_col] < close_price_for_chikou_comparison)
-            ichimoku_buy_cond_agg &= chikou_break_up
-            ichimoku_sell_cond_agg &= chikou_break_down
+            ichimoku_component_buy_conditions.append(chikou_break_up)
+            ichimoku_component_sell_conditions.append(chikou_break_down)
+        elif use_chikou_cross > 0:
+            ichimoku_component_buy_conditions.append(pd.Series(False, index=df.index))
+            ichimoku_component_sell_conditions.append(pd.Series(False, index=df.index))
+            
+        # Combine Ichimoku components (all active components must be true)
+        final_ichimoku_buy_trigger = pd.Series(True, index=df.index)
+        if not ichimoku_component_buy_conditions: # No ichimoku component was activated
+             if use_tenkan_kijun_cross > 0 or use_kumo_breakout > 0 or use_chikou_cross > 0: # if any ichimoku flag was on
+                 final_ichimoku_buy_trigger = pd.Series(False, index=df.index) # Means conditions were not met or data missing
+        else:
+            for cond in ichimoku_component_buy_conditions:
+                final_ichimoku_buy_trigger &= cond
+        
+        final_ichimoku_sell_trigger = pd.Series(True, index=df.index)
+        if not ichimoku_component_sell_conditions:
+            if use_tenkan_kijun_cross > 0 or use_kumo_breakout > 0 or use_chikou_cross > 0:
+                final_ichimoku_sell_trigger = pd.Series(False, index=df.index)
+        else:
+            for cond in ichimoku_component_sell_conditions:
+                final_ichimoku_sell_trigger &= cond
 
         if use_ichimoku_entry == 2:
-            entry_mandatory_long_cond &= ichimoku_buy_cond_agg
-            entry_mandatory_short_cond &= ichimoku_sell_cond_agg
+            entry_mandatory_long_cond &= final_ichimoku_buy_trigger
+            entry_mandatory_short_cond &= final_ichimoku_sell_trigger
         elif use_ichimoku_entry == 1:
-            entry_optional_long_cond_list.append(ichimoku_buy_cond_agg)
-            entry_optional_short_cond_list.append(ichimoku_sell_cond_agg)
+            entry_optional_long_cond_list.append(final_ichimoku_buy_trigger)
+            entry_optional_short_cond_list.append(final_ichimoku_sell_trigger)
+
 
     final_entry_optional_long_cond = pd.Series(True, index=df.index)
     if entry_optional_long_cond_list:
@@ -600,13 +641,14 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
         flat_fw_params = {k.upper() if isinstance(k, str) else k: v for k,v in params_from_backtester.items()}
         merged_params_for_exit.update(flat_fw_params)
 
-    def _get_exit_param(key_name_upper, is_float=False, is_activation_flag=False, is_bool=False):
+    def _get_exit_param(key_name_upper, is_float=False, is_activation_flag=False, is_bool=False, is_int=False):
         val = merged_params_for_exit.get(key_name_upper.upper())
         if val is None:
             print(f"[Strategy Exit Param Warning] Param '{key_name_upper}' not found. Using fallback.")
             if is_activation_flag: return 0
             if is_bool: return False
             if is_float: return 0.0
+            if is_int: return 0
             return None
         try:
             if is_activation_flag: return int(float(val))
@@ -615,21 +657,26 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
                 if isinstance(val, str): return val.lower() in ['true', '1', 'yes', 'on']
                 return bool(int(float(val)))
             if is_float: return float(val)
+            if is_int: return int(float(val))
             return val
         except (ValueError, TypeError):
             print(f"[Strategy Exit Param Warning] Conversion error for '{key_name_upper}', val '{val}'. Using fallback.")
             if is_activation_flag: return 0
             if is_bool: return False
             if is_float: return 0.0
+            if is_int: return 0
             return None
             
     exit_reason_list = []; exit_now = False
 
+    # --- 損切りロジック ---
     sl_stoch_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_STOCH_REVERSE_ACTIVE', is_activation_flag=True)
     sl_macd_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_MACD_REVERSE_ACTIVE', is_activation_flag=True)
     sl_bb_middle_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_BB_MIDDLE_REVERSE_ACTIVE', is_activation_flag=True)
     sl_atr_multiple = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_ATR_MULTIPLE', is_float=True)
     sl_macd_hist_ema_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_MACD_HIST_EMA_REVERSE_ACTIVE', is_activation_flag=True)
+    sl_fixed_amount_active = _get_exit_param('ACTIVATION_FLAGS_STOP_LOSS_FIXED_AMOUNT_ACTIVE', is_activation_flag=True)
+    max_loss_yen = _get_exit_param('FIXED_LOSS_CUT_SETTINGS_MAX_LOSS_PER_TRADE_YEN', is_int=True)
     
     atr_period_for_sl_ctx_val = _get_exit_param('ATR_SETTINGS_STOP_PERIOD_CONTEXT')
     atr_period_for_sl_ctx = None
@@ -674,6 +721,21 @@ def determine_exit_conditions(current_position, current_bar_data, prev_bar_data,
                 exit_reason_list.append("SL:MACDhist<EMA")
             elif current_position == -1 and hist_curr > hist_ema_curr:
                 exit_reason_list.append("SL:MACDhist>EMA")
+                
+    if sl_fixed_amount_active > 0 and max_loss_yen > 0 and entry_price is not None:
+        current_price_for_pnl = current_bar_data.get('Close') 
+        if current_price_for_pnl is not None and not np.isnan(current_price_for_pnl):
+            loss_per_share = 0
+            if current_position == 1: # ロング
+                loss_per_share = entry_price - current_price_for_pnl
+            elif current_position == -1: # ショート
+                loss_per_share = current_price_for_pnl - entry_price
+            
+            current_shares_in_position = current_bar_data.get('current_shares_in_pos', 0) # base.pyから渡してもらう想定
+            if current_shares_in_position > 0:
+                total_unrealized_loss = loss_per_share * current_shares_in_position
+                if total_unrealized_loss >= max_loss_yen:
+                    exit_reason_list.append(f"SL:FixedLoss {max_loss_yen}円")
 
     if exit_reason_list:
         exit_now = True
